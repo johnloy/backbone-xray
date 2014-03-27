@@ -1,0 +1,30 @@
+{
+  "name": "backbone-xray",
+  "description": "A configurable event logger for Backbone apps",
+  "version": "0.1.0",
+  "homepage": "https://github.com/johnloy/backbone.xray",
+  "author": {
+    "name": "John Loy",
+    "email": "loy.john@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/johnloy/backbone.xray.git"
+  },
+  "bugs": {
+    "url": "https://github.com/johnloy/backbone.xray/issues"
+  },
+  "licenses": [
+    {
+      "type": "MIT",
+      "url": "https://github.com/johnloy/backbone.xray/blob/master/LICENSE-MIT"
+    }
+  ],
+  "main": "backbone.xray",
+  "engines": {
+    "node": "*"
+  }
+  "devDependencies": {
+  },
+  "keywords": []
+}

@@ -1,0 +1,11 @@
+{
+  "name": "backbone-xray",
+  "version": "0.1.0",
+  "main": "backbone.xray.js",
+  "dependencies": {
+    "jquery": ">=1.6",
+    "underscore": ">=1.5",
+    "backbone": "~1.1",
+    "requirejs": "~2.1"
+  }
+}
