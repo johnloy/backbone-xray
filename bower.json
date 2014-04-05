@@ -1,6 +1,6 @@
 {
   "name": "backbone-xray",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "backbone.xray.js",
   "dependencies": {
     "backbone": ">=1.0"
