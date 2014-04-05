@@ -182,20 +182,42 @@
     return typeOf;
   }
 
+  var defaultConfig = {
+    instrumented : [],
+    constructors : backboneConstructors,
+    getTypeOf    : getBackboneTypeOf,
+    formatters   : [],
+    aliases      : [
+      {
+        name: 'backbone',
+        expanded: ['Model', 'Collection', 'View', 'Router']
+      },
+      {
+        name: 'backbone-data',
+        expanded: ['Model', 'Collection']
+      }
+    ]
+  };
+
   xray = _.extend(xray, {
 
-    config: {
-      instrumented : [],
-      constructors : {},
-      getTypeOf    : getBackboneTypeOf,
-      formatters   : [],
-      aliases      : []
-    },
+    config: defaultConfig,
+    defaultConfig: defaultConfig,
 
     configure: function(config) {
-      _.extend(this.config, _.omit(config, 'aliases'));
+      this.config = _.extend({}, this.defaultConfig, _.omit(config, 'aliases'));
 
       if(config.instrumented) addInstrumentation(config.instrumented);
+
+      if(config.constructors) {
+        this.config.constructors = _.extend(
+          defaultConfig.constructors,
+          this.config.constructors
+        )
+        if(!config.getTypeOf) 
+          console.warn('You provided a constructors config property but no custom getTypeOf method. ' +
+                        'Backbone-Xray will not be able recognize instances of the constructors you provided.')
+      } 
 
       // Must use the addAliases method, because the aliases need to be parsed
       if(config.aliases) this.addAliases.apply(this, config.aliases);
@@ -392,7 +414,7 @@
     },
 
     isInstanceOf: function(obj, constr) {
-      constr = typeof constr === 'function' ? constr : this.constructors[constr];
+      constr = typeof constr === 'function' ? constr : this.config.constructors[constr];
       if(typeof constr !== 'undefined') return (obj instanceof constr);
       return false;
     },
@@ -406,7 +428,7 @@
     }, 
 
     isObjLoggedConstructor: function(obj) {
-       return _.any(this.getLoggedConstructorNames(), _.partial(this.isInstanceOf, obj));
+       return _.any(this.getLoggedConstructorNames(), _.bind(this.isInstanceOf, this, obj));
     },
 
     doesObjMatchAlias: function(obj) {
@@ -474,7 +496,7 @@
     },
 
     addAliases: function() {
-      this.config.aliases = _.toArray(arguments);
+      this.config.aliases = _.union(this.config.aliases, _.toArray(arguments));
       this.config.aliases = _.map(this.config.aliases, _.bind(this.expandEventAliases, this));
       this.parseEventSpecifiers();
     },
@@ -571,4 +593,5 @@
 
   // Export the module to Backbone in the browser, and AMD and Node via return
   return (Backbone.xray = xray);
-});
+  
+}));
