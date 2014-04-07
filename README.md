@@ -28,7 +28,7 @@ In non-trivial Backbone applications that make heavy use of custom events, it ca
 
 To confidently work on a sophisticated event-driven app, it helps to have a full grasp of the effect of triggering any event. Doing this by manually littering code with scattered console.log calls is messy and bound to be uncomprehensive.
 
-Backbone-Xray provides the ability to log and inspect the linear flow of select events and method calls in a Backbone application, without the need to manually insert console.log statements. With it, events triggered on any object that extends Backbone.Events, in addition to potentially any method on any object (even non-Backbone), can be logged and formatted exactly to your liking and needs. Crucial aspects of an event, like the name, triggering object, and listeners can also be included in a log entry to provide context beyond the simple sequence of events. The configuration options provided by Backbone-Xray let you limit your logging to only what you want to capture.
+Backbone-Xray provides the ability to log and inspect the linear flow of select events and method calls in a Backbone application, without the need to manually insert console.log statements. With it, events triggered on any object that extends Backbone.Model, Backbone.Collection, Backbone.View, or Backbone.Router, in addition to potentially any method on any object (even non-Backbone), can be logged and formatted exactly to your liking and needs. Crucial aspects of an event, like the name, triggering object, and listeners can also be included in a log entry to provide context beyond the simple sequence of events. The configuration options provided by Backbone-Xray let you limit your logging to only what you want to capture.
 
 Features
 ------------
@@ -38,9 +38,9 @@ Features
 * Interactive Javascript console api for activation toggling, configuring, and operating
 * Remains dormant and imposes no processing overhead by default until activated from the JS console
 * Once activated, optionally persists active state and settings on page reloads (browser only; uses localStorage)
-* Log entries are collapsed console groups, if the console supports grouping, containing useful information about event context
+* If the console supports console.group, log entries are collapsed console groups containing useful information about event context
 * Console groups with extra information are optional (runs faster without them)
-* Log entries by default include: 
+* By default, log entries include:
   * Backbone constructor name (e.g. Model, Collection, View, or Router)
   * Backbone id or cid, if either exists
   * Event name

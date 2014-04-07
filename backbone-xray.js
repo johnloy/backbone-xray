@@ -13,7 +13,7 @@
 	}
 }(this, function( exports, Backbone, _) {
 
-  var xray = { VERSION: '0.1.0' },
+  var xray = { VERSION: '0.1.2' },
       SETTINGS_STORAGE_KEY = 'backbone.xray.settings',
       persistedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
       persistSettingsOpt = persistedSettings ? true : false;
@@ -128,7 +128,7 @@
 
       var traceDetails = trace();
       _.defer(function() {
-        xray.logEvent(self, eventName, data, traceDetails[0], traceDetails[1], timeElapsed);
+        xray.log(self, eventName, data, traceDetails[0], traceDetails[1], timeElapsed);
       });
     }
 
@@ -172,20 +172,21 @@
     'Router'     : Backbone.Router
   };
 
-  function getBackboneTypeOf(obj) {
-    var typeOf = '';
-    _.find(backboneConstructors, function(constr, constrName) {
-      var isInstance = obj instanceof constr;
-      if(isInstance) typeOf = constrName;
-      return isInstance;
-    });
-    return typeOf;
-  }
+  function getTypeOf(obj) {
+    var constructors = this.constructors;
+    for(constrName in constructors) {
+      if(obj.constructor === constructors[constrName]) return constrName;
+    }
+    for(constrName in constructors) {
+      if(obj instanceof constructors[constrName]) return constrName;
+    }
+    return 'Object';
+  };
 
   var defaultConfig = {
     instrumented : [],
     constructors : backboneConstructors,
-    getTypeOf    : getBackboneTypeOf,
+    getTypeOf    : getTypeOf,
     formatters   : [],
     aliases      : [
       {
@@ -202,6 +203,7 @@
   xray = _.extend(xray, {
 
     config: defaultConfig,
+
     defaultConfig: defaultConfig,
 
     configure: function(config) {
@@ -282,7 +284,7 @@
         return;
       }
 
-      this.eventSpecifiers = _.toArray(arguments).sort(this.compareEventSpecifiers);
+      this.eventSpecifiers = _.toArray(arguments).sort(_compareEventSpecifiers);
       this.validateEventSpecifiers();
       this.parseEventSpecifiers();
       this.startLoggingEvents();
@@ -337,7 +339,7 @@
 
         // String or Regexp event name specifier
         else {
-          loggedEvents.push(self.toRegExpString(specifier));
+          loggedEvents.push(_toRegExpString(specifier));
         }
       });
 
@@ -345,66 +347,21 @@
 
       if(xray.persistSettings) {
         xray.applySetting('loggedEvents', loggedEvents);
-        xray.applySetting('eventSpecifiers', this.stringifyEventSpecifiers());
+        xray.applySetting('eventSpecifiers', _stringifyEventSpecifiers());
       }
 
       eventSpecifiersParsed = true;
     },
 
     validateEventSpecifiers: function() {
-      if(!this.isValidEventSpecifier.apply(this, this.eventSpecifiers)) {
+      if(!_isValidEventSpecifier.apply(this, this.eventSpecifiers)) {
         throw new Error('Specifier for types of events to log must be a String or RexExp.');
       }
     },
 
-    compareEventSpecifiers: function(a, b) {
-      if( (_.isString(a) && a[0].match(/[A-Z]/)) ||
-           _.isFunction(a) ) {
-        return -1;
-      }
-      return 1;
-    },
-
-    stringifyEventSpecifiers: function() {
-      var self = this;
-      return _.map(this.eventSpecifiers, function(specifier) {
-        if(specifier instanceof RegExp) return self.toRegExpString(specifier);
-        return specifier;
-      });
-    },
-
-    // We can't store RegExp objects in this.loggedEvents, as identical RegExp
-    // instances aren't ===, so comparison's don't work (WTF ???)
-    toRegExpString: function(pattern) {
-      if(this.isPatternSpecifier(pattern.toString())) {
-        return pattern.toString();
-      }
-      else {
-        return '/' + pattern + '/';
-      }
-    },
-
-    toRegExp: function(patternStr) {
-      return RegExp(patternStr.slice(1,-1));
-    },
-
-    isValidEventSpecifier: function() {
-      var self = this,
-          specifiers = _.toArray(arguments);
-      return _.all(specifiers, function(specifier) {
-        return _.any( [ _.isString, _.isRegExp ],
-          function(test) { return test(specifier); }
-        );
-      });
-    },
-
-    isPatternSpecifier: function(specifier) {
-      return _.isString(specifier) && specifier[0] === '/';
-    },
-
     isEventNameLogged: function(eventName) {
-      var loggedPatterns = _.select(this.loggedEvents, this.isPatternSpecifier),
-          regexes = _.map(loggedPatterns, this.toRegExp);
+      var loggedPatterns = _.select(this.loggedEvents, _isPatternSpecifier),
+          regexes = _.map(loggedPatterns, _patternStrToRegExp);
           eventNameMatches = function(regex) { return regex.test(eventName); };
       return _.isEmpty(loggedPatterns) || _.any(regexes, eventNameMatches);
     },
@@ -413,22 +370,16 @@
       return typeof testStr === 'string' && testStr.match(/^[A-Z]/);
     },
 
-    isInstanceOf: function(obj, constr) {
-      constr = typeof constr === 'function' ? constr : this.config.constructors[constr];
-      if(typeof constr !== 'undefined') return (obj instanceof constr);
-      return false;
-    },
-
     getLoggedConstructorNames: function() {
       return _.select(this.loggedEvents, this.isConstructorName);
     },
 
     isObjLogged: function(obj) {
-      return this.isObjLoggedConstructor(obj) || this.doesObjMatchAlias(obj);
+      return this.isObjLoggedInstance(obj) || this.doesObjMatchAlias(obj);
     }, 
 
-    isObjLoggedConstructor: function(obj) {
-       return _.any(this.getLoggedConstructorNames(), _.bind(this.isInstanceOf, this, obj));
+    isObjLoggedInstance: function(obj) {
+       return _.any(this.getLoggedConstructorNames(), _.bind(_isInstanceOf, this, obj));
     },
 
     doesObjMatchAlias: function(obj) {
@@ -454,7 +405,14 @@
             function getId() {
               var obj = eventInfo.obj,
                   idProp = obj.id ? 'id' : 'cid';
-              return self.config.getTypeOf(obj) + '(' + idProp + ': ' + obj[idProp] + ')';
+              if(obj[idProp]) {
+                return self.config.getTypeOf(obj) + '(' + idProp + ': ' + obj[idProp] + ')';
+              }
+            },
+            function getLength() {
+              if(obj instanceof Backbone.Collection) {
+                return self.config.getTypeOf(obj) + '(length: ' + obj.length + ')';
+              }
             }
           ].reverse(),
           i = strategies.length;
@@ -497,37 +455,11 @@
 
     addAliases: function() {
       this.config.aliases = _.union(this.config.aliases, _.toArray(arguments));
-      this.config.aliases = _.map(this.config.aliases, _.bind(this.expandEventAliases, this));
+      this.config.aliases = _.map(this.config.aliases, _.bind(_expandEventAliases, this));
       this.parseEventSpecifiers();
     },
 
-    expandEventAliases: function(alias) {
-      var self = this;
-
-      if(!alias.expanded) {
-        alias.expanded = [alias.name];
-      }
-
-      while(this.containsUnexpandedAlias(alias.expanded)) {
-        alias.expanded = _.chain(alias.expanded).map(function(expansion) {
-          var unexpanded = ~expansion.indexOf('*'),
-              resolveKey;
-          if(unexpanded) {
-            resolveKey = expansion.slice(1);
-            return _.findWhere(self.config.aliases, {name: resolveKey}).expanded;
-          }
-          return expansion;
-        }).flatten().uniq().value();
-      }
-
-      return alias;
-    },
-
-    containsUnexpandedAlias: function(expanded) {
-      return ~(expanded.join('').indexOf('*'));
-    },
-
-    logEvent: function(obj, name, data, stack, location, timeElapsed) {
+    log: function(obj, name, data, stack, location, timeElapsed) {
       var self = this, c = console, eventInfo;
 
       eventInfo = {
@@ -583,6 +515,96 @@
     }
 
   });
+
+
+  function _compareEventSpecifiers(a, b) {
+    if( (_.isString(a) && a[0].match(/[A-Z]/)) ||
+       _.isFunction(a) ) {
+      return -1;
+    }
+    return 1;
+  }
+
+  function _containsUnexpandedAlias(expanded) {
+    return ~(expanded.join('').indexOf('*'));
+  }
+
+  function _expandEventAliases(alias) {
+    var self = this;
+
+    if(!alias.expanded) {
+      alias.expanded = [alias.name];
+    }
+
+    while(_containsUnexpandedAlias(alias.expanded)) {
+      alias.expanded = _.chain(alias.expanded).map(function(expansion) {
+        var unexpanded = ~expansion.indexOf('*'),
+        resolveKey;
+        if(unexpanded) {
+          resolveKey = expansion.slice(1);
+          return _.findWhere(self.config.aliases, {name: resolveKey}).expanded;
+        }
+        return expansion;
+      }).flatten().uniq().value();
+    }
+
+    return alias;
+  }
+
+  function _isInstanceOf(obj, constr) {
+    constr = typeof constr === 'function' ? constr : this.config.constructors[constr];
+    if(typeof constr !== 'undefined') return (obj instanceof constr);
+    return false;
+  }
+
+  function _isPatternSpecifier(specifier) {
+    return _.isString(specifier) && specifier[0] === '/';
+  }
+
+  function _isValidEventSpecifier() {
+    var self = this,
+    specifiers = _.toArray(arguments);
+    return _.all(specifiers, function(specifier) {
+      return _.any( [ _.isString, _.isRegExp ],
+                   function(test) { return test(specifier); }
+                  );
+    });
+  }
+
+  function _stringifyEventSpecifiers() {
+    var self = this;
+    return _.map(this.eventSpecifiers, function(specifier) {
+      if(specifier instanceof RegExp) return _toRegExpString(specifier);
+      return specifier;
+    });
+  }
+
+  function _patternStrToRegExp(patternStr) {
+    return RegExp(patternStr.slice(1,-1));
+  }
+
+  // We can't store RegExp objects in this.loggedEvents, as identical RegExp
+  // instances aren't ===, so comparison's don't work (WTF ???)
+  function _toRegExpString(pattern) {
+    if(_isPatternSpecifier(pattern.toString())) {
+      return pattern.toString();
+    }
+    else {
+      return '/' + pattern + '/';
+    }
+  }
+
+  [ _compareEventSpecifiers,
+    _containsUnexpandedAlias,
+    _expandEventAliases,
+    _isInstanceOf,
+    _isPatternSpecifier,
+    _isValidEventSpecifier,
+    _stringifyEventSpecifiers,
+    _patternStrToRegExp,
+    _toRegExpString
+  ].forEach(function(f) { f = f.bind(xray); });
+ 
 
   // Alias these for semantic convenience
   xray.addFormatter = xray.addFormatters;
