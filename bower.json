@@ -4,5 +4,14 @@
   "main": "backbone.xray.js",
   "dependencies": {
     "backbone": ">=1.0"
-  }
+  },
+  "ignore": [
+    "backbone-xray.min.js",
+    "docs",
+    "example",
+    "test",
+    "*.yml",
+    "*.map"
+  ],
+  "homepage": "https://github.com/johnloy/backbone-xray"
 }
