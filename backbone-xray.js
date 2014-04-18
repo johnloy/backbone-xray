@@ -1,48 +1,140 @@
-(function(root, factory) {
-	// Support AMD 
-	if(typeof define === 'function' && define.amd) {
-		define([ 'exports', 'backbone', 'underscore' ], factory);
-	}
-	// Support Node.js or CommonJS.
-	else if(typeof exports === 'object') {
-		factory(exports, require('backbone'), require('underscore'));
-	}
-	// Support browser global Backbone var. Use `root` here as it references `window`.
-	else {
-		factory(root, root.Backbone, root._);
-	}
-}(this, function( exports, Backbone, _) {
+/* ==========================================================================
+ * Backbone-Xray: backbone-xray.js v@VERSION
+ * https://github.com/johnloy/backbone-xray/blob/master/backbone-xray.js
+ * ==========================================================================
+ * Copyright 2014 John Loy
+ * Licensed under MIT (https://github.com/johnloy/backbone-xray/blob/master/LICENSE)
+ * ========================================================================== */
 
-  var xray = { VERSION: '0.1.2' },
-      SETTINGS_STORAGE_KEY = 'backbone.xray.settings',
-      persistedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+(function(root, factory) {
+
+  // Support AMD
+  if(typeof define === 'function' && define.amd) {
+    define([ 'exports', 'backbone', 'underscore', 'jquery' ], factory);
+  }
+  // Support Node.js or CommonJS.
+  else if(typeof exports === 'object') {
+    factory(exports, require('backbone'), require('underscore'), require('jquery'));
+  }
+  // Support browser global Backbone var. Use `root` here as it references `window`.
+  else {
+    factory(root, root.Backbone, root._, root.jQuery);
+  }
+
+}(this, function( exports, Backbone, _, $) {
+
+  'use strict';
+
+  var xray = { VERSION: '@VERSION' },
+      BBXR_DEVELOPMENT = true;
+
+  var noop = $.noop,
+
+      // start matching after: comment start block => ! or @preserve => optional whitespace => newline
+      // stop matching before: last newline => optional whitespace => comment end block
+      reCommentContents = /\/\*!?(?:\@preserve)?[ \t]*(?:\r\n|\n)([\s\S]*?)(?:\r\n|\n)\s*\*\//;
+
+  var backboneConstructors = {
+    'Model'      : Backbone.Model,
+    'Collection' : Backbone.Collection,
+    'View'       : Backbone.View,
+    'Router'     : Backbone.Router
+  };
+
+
+ /**
+  * ## Utilities
+  * ======================================================================== */
+
+  var util = {
+
+    parseUri: function(url) {
+      var a, url, lastPathSep, query, subdomains;
+
+      a = $('<a>', { href: url } )[0];
+      lastPathSep = a.pathname.lastIndexOf('/');
+      query = a.search.substr(1); // remove leading /
+      subdomains = a.hostname.split('.').slice(0, -2);
+
+      return {
+        directory: a.pathname.substr(0, lastPathSep),
+        file: a.pathname.slice(lastPathSep + 1),
+        hash: a.hash.slice(1), // remove leading #
+        host: a.hostname,
+        path: a.pathname,
+        params: util.parseQueryParams(query),
+        protocol: a.protocol.slice(0, -1), // remove trailing :
+        query: query,
+        subdomains: subdomains,
+        tld: a.hostname.substr(a.hostname.lastIndexOf('.') +1),
+        userInfo: {
+          user: a.username,
+          password: a.password
+        }
+      }
+    },
+
+    parseQueryParams: function(query) {
+      var re = /([^&=]+)=?([^&]*)/g,
+          decodeRE = /\+/g,  // Regex for replacing addition symbol with a space
+          decode = function (str) {return decodeURIComponent( str.replace(decodeRE, " ") );},
+          params = {},
+          matches = null;
+
+      while ( matches = re.exec(query) ) {
+          var k = decode( matches[1] ), v = decode( matches[2] );
+          if (k.substring(k.length - 2) === '[]') {
+              k = k.substring(0, k.length - 2);
+              (params[k] || (params[k] = [])).push(v);
+          }
+          else params[k] = v;
+      }
+
+      return params;
+    },
+
+    // Mad props to Sindre Sorhus for this great multiline string hack
+    // https://github.com/sindresorhus/multiline
+    multilineString: function(fn) {
+      if (typeof fn !== 'function') {
+        throw new TypeError('Expected a function.');
+      }
+
+      var match = reCommentContents.exec(fn.toString());
+
+      if (!match) {
+        throw new TypeError('Multiline comment missing.');
+      }
+
+      return this.stripIndent(match[1]);
+    },
+
+    stripIndent: function(str) {
+      var match = str.match(/^[ \t]*(?=[^\s])/gm);
+
+      if (!match) {
+        return str;
+      }
+
+      var indent = Math.min.apply(Math, match.map(function (el) { return el.length }));
+      var re = new RegExp('^[ \\t]{' + indent + '}', 'gm');
+
+      return indent > 0 ? str.replace(re, '') : str;
+    }
+
+  };
+
+
+ /**
+  * ## Settings
+  * ======================================================================== */
+
+  var SETTINGS_STORAGE_KEY = 'backbone-xray.settings',
+      persistedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY),
       persistSettingsOpt = persistedSettings ? true : false;
 
-  Object.defineProperty(xray, 'persistSettings', {
-    get: function() {
-      return persistSettingsOpt;
-    },
-    set: function(persist) {
-      if(persist) {
-        initPersistedSettings();
-      }
-      else {
-        destroyPersistedSettings();
-      }
-      persistSettingsOpt = persist;
-      return persist;
-    }
-  });
+  var _initPersistedSettings = function () {
 
-  if(persistedSettings) {
-    xray.settings = persistedSettings;
-    initPersistedSettings();
-    xray.persistSettings = true;
-  } else {
-    xray.persistSettings = persistSettingsOpt;
-  } 
-
-  function initPersistedSettings() {
     Object.defineProperty(xray, 'settings', {
       get: function() {
         var settings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
@@ -58,8 +150,35 @@
     xray.settings = xray.settings || {};
   };
 
-  function destroyPersistedSettings() {
+  var _destroyPersistedSettings = function () {
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
+  };
+
+  // Public API
+
+  Object.defineProperty(xray, 'persistSettings', {
+    get: function() {
+      return persistSettingsOpt;
+    },
+    set: function(persist) {
+      if(persist) {
+        _initPersistedSettings();
+      }
+      else {
+        _destroyPersistedSettings();
+      }
+      persistSettingsOpt = persist;
+      return persist;
+    }
+  });
+
+  if(persistedSettings) {
+    xray.settings = persistedSettings;
+    _initPersistedSettings();
+    xray.persistSettings = true;
+  } else {
+    xray.settings = {};
+    xray.persistSettings = persistSettingsOpt;
   }
 
   xray.applySetting = function(name, val) {
@@ -78,41 +197,40 @@
   };
 
 
-
-
+ /**
+  * ## Instrumentation of Backbone.Events.trigger and other arbitrary methods
+  * ======================================================================== */
 
   var origTrigger = Backbone.Events.trigger,
-      trigger     = origTrigger,
-      eventSpecifiersParsed = false;
+      trigger     = origTrigger;
 
-  Backbone.on('xray-logging-start', addInstrumentation);
-  Backbone.on('xray-logging-stop' , removeInstrumentation);
+  var _isRelevantLine = function (stackLine) {
+   if( ~stackLine.indexOf('events.js') ||
+       ~stackLine.indexOf('_base.js')) return false;
+   return (/\/javascripts\//).test(stackLine);
+  };
 
-  function addInstrumentation() {
-    if(xray.config.instrumented) {
-      _.each(xray.instrumented, function(obj) {
-        obj.trigger = triggerWithLogging;
-      });
+  // TODO: Extend this so it isn't totally based on Chrome's error stack implementation
+  var _trace = function (){
+
+    try { throw Error(); }
+    catch(err) {
+      var stackLines = err.stack.split("\n").slice(4),
+          relevantLine = _.find(stackLines, _isRelevantLine),
+          details = [];
+
+      details[0] = "\n" + stackLines.join("\n");
+
+      if(relevantLine) {
+        var url = relevantLine.match(/\((.*)\)/);
+        details[1] = url ? url[1] : undefined;
+      }
+
+      return details;
     }
-    Backbone.Model.prototype.trigger      =
-    Backbone.Collection.prototype.trigger =
-    Backbone.View.prototype.trigger       =
-    Backbone.Router.prototype.trigger     = triggerWithLogging;
-  }
+  };
 
-  function removeInstrumentation() {
-    if(xray.config.instrumented) {
-      _.each(xray.instrumented, function(obj) {
-        obj.trigger = origTrigger;
-      });
-    }
-    Backbone.Model.prototype.trigger      =
-    Backbone.Collection.prototype.trigger =
-    Backbone.View.prototype.trigger       =
-    Backbone.Router.prototype.trigger     = origTrigger;
-  }
-
-  function triggerWithLogging(eventName, data) {
+  var _triggerWithLogging = function (eventName, data) {
     var self = this,
         timeElapsed = null;
 
@@ -126,106 +244,201 @@
       }
       window.performance.mark('xray-taken');
 
-      var traceDetails = trace();
+      var traceDetails = _trace();
       _.defer(function() {
         xray.log(self, eventName, data, traceDetails[0], traceDetails[1], timeElapsed);
       });
     }
 
     origTrigger.apply(this, arguments);
-  }
-
-  // This is totally based on Chrome's error stack implementation
-  function trace(){
-
-    try { throw Error(); }
-    catch(err) {
-      var stackLines = err.stack.split("\n").slice(4),
-          relevantLine = _.find(stackLines, isRelevantLine),
-          details = [];
-
-      details[0] = "\n" + stackLines.join("\n");
-
-      if(relevantLine) {
-        var url = relevantLine.match(/\((.*)\)/);
-        details[1] = url ? url[1] : undefined;
-      }
-
-      return details;
-    }
-  }
-
-  function isRelevantLine(stackLine) {
-   if( ~stackLine.indexOf('events.js') ||
-       ~stackLine.indexOf('_base.js')) return false;
-   return (/\/javascripts\//).test(stackLine);
-  }
-
-
-  var noop = function(){},
-      eventSpecifiersParsed = false;
-
-  var backboneConstructors = { 
-    'Model'      : Backbone.Model,
-    'Collection' : Backbone.Collection,
-    'View'       : Backbone.View,
-    'Router'     : Backbone.Router
   };
 
-  function getTypeOf(obj) {
-    var constructors = this.constructors;
-    for(constrName in constructors) {
-      if(obj.constructor === constructors[constrName]) return constrName;
+  var _addInstrumentation = function () {
+    if(xray.config.instrumented) {
+      _.each(xray.instrumented, function(obj) {
+        obj.trigger = _triggerWithLogging;
+      });
     }
-    for(constrName in constructors) {
-      if(obj instanceof constructors[constrName]) return constrName;
-    }
-    return 'Object';
+    Backbone.Model.prototype.trigger      =
+    Backbone.Collection.prototype.trigger =
+    Backbone.View.prototype.trigger       =
+    Backbone.Router.prototype.trigger     = _triggerWithLogging;
   };
 
-  var defaultConfig = {
-    instrumented : [],
-    constructors : backboneConstructors,
-    getTypeOf    : getTypeOf,
-    formatters   : [],
-    aliases      : [
-      {
-        name: 'backbone',
-        expanded: ['Model', 'Collection', 'View', 'Router']
+  var _removeInstrumentation = function () {
+    if(xray.config.instrumented) {
+      _.each(xray.instrumented, function(obj) {
+        obj.trigger = origTrigger;
+      });
+    }
+    Backbone.Model.prototype.trigger      =
+    Backbone.Collection.prototype.trigger =
+    Backbone.View.prototype.trigger       =
+    Backbone.Router.prototype.trigger     = origTrigger;
+  };
+
+  Backbone.on('xray-logging-start', _addInstrumentation);
+  Backbone.on('xray-logging-stop' , _removeInstrumentation);
+
+
+ /**
+  * ## Optional loading of a UI on demand
+  * ======================================================================== */
+
+  xray.openUi = function(initView) {
+    var thisScript, baseName, fileName, uiUrl;
+    var chromeExtensionPrefix = 'chrome-extension://kjomdambjjdfjoihpccpanpelcjhgfhd/';
+    thisScript = document.querySelector('script[src$="/backbone-xray.js"]').src;
+
+    var scriptUrlParts = thisScript.split('/');
+    baseName = scriptUrlParts.slice(0, -1).join('/');
+    fileName = scriptUrlParts.slice(-1);
+
+    if(~baseName.indexOf('file://')) {
+      uiUrl = chromeExtensionPrefix + 'backbone-xray-ui.js?init_view=' + initView;
+    }
+    else {
+
+    }
+
+    $('<script />', { src: uiUrl }).appendTo('body');
+  };
+
+
+ /**
+  * ## Defaults
+  * ======================================================================== */
+
+ var defaults = {
+
+    chromeExtensionId: null,
+
+    config: {
+
+      instrumented : [],
+
+      constructors : backboneConstructors,
+
+      getTypeOf    : function (obj) {
+        var constructors = this.constructors,
+            constrName;
+
+        for(constrName in constructors) {
+          if(obj.constructor === constructors[constrName]) return constrName;
+        }
+        for(constrName in constructors) {
+          if(obj instanceof constructors[constrName]) return constrName;
+        }
+        return 'Object';
       },
-      {
-        name: 'backbone-data',
-        expanded: ['Model', 'Collection']
-      }
-    ]
+
+      formatters   : [],
+
+      aliases      : [
+        {
+          name: 'backbone',
+          expanded: ['Model', 'Collection', 'View', 'Router']
+        },
+        {
+          name: 'backbone-data',
+          expanded: ['Model', 'Collection']
+        }
+      ]
+
+    }
+
   };
+
+
+ /**
+  * ## Main API
+  * ======================================================================== */
+
+  var eventSpecifiersParsed = false;
+
+  // Private methods
+
+  var _compareEventSpecifiers = function (a, b) {
+    if( (_.isString(a) && a[0].match(/[A-Z]/)) ||
+       _.isFunction(a) ) {
+      return -1;
+    }
+    return 1;
+  };
+
+  var _containsUnexpandedAlias = function (expanded) {
+    return ~(expanded.join('').indexOf('*'));
+  };
+
+  var _expandEventAliases = function (alias) {
+
+    if(!alias.expanded) {
+      alias.expanded = [alias.name];
+    }
+
+    while(_containsUnexpandedAlias(alias.expanded)) {
+      alias.expanded = _.chain(alias.expanded).map(function(expansion) {
+        var unexpanded = ~expansion.indexOf('*'),
+        resolveKey;
+        if(unexpanded) {
+          resolveKey = expansion.slice(1);
+          return _.findWhere(xray.config.aliases, {name: resolveKey}).expanded;
+        }
+        return expansion;
+      }).flatten().uniq().value();
+    }
+
+    return alias;
+  };
+
+  var _isInstanceOf = function (obj, constr) {
+    constr = typeof constr === 'function' ? constr : xray.config.constructors[constr];
+    if(typeof constr !== 'undefined') return (obj instanceof constr);
+    return false;
+  };
+
+  var _isPatternSpecifier = function (specifier) {
+    return _.isString(specifier) && specifier[0] === '/';
+  };
+
+  var _isValidEventSpecifier = function () {
+    var specifiers = _.toArray(arguments);
+    return _.all(specifiers, function(specifier) {
+      return _.any( [ _.isString, _.isRegExp ],
+                   function(test) { return test(specifier); }
+                  );
+    });
+  };
+
+  var _stringifyEventSpecifiers = function (eventSpecifiers) {
+    return _.map(eventSpecifiers, function(specifier) {
+      if(specifier instanceof RegExp) return _toRegExpString(specifier);
+      return specifier;
+    });
+  };
+
+  var _patternStrToRegExp = function (patternStr) {
+    return RegExp(patternStr.slice(1,-1));
+  };
+
+  // We can't store RegExp objects in xray.loggedEvents, as identical RegExp
+  // instances aren't ===, so comparison's don't work (WTF ???)
+  var _toRegExpString = function (pattern) {
+    if(_isPatternSpecifier(pattern.toString())) {
+      return pattern.toString();
+    }
+    else {
+      return '/' + pattern + '/';
+    }
+  };
+
+  // Public API
 
   xray = _.extend(xray, {
 
-    config: defaultConfig,
+    defaults: defaults,
 
-    defaultConfig: defaultConfig,
-
-    configure: function(config) {
-      this.config = _.extend({}, this.defaultConfig, _.omit(config, 'aliases'));
-
-      if(config.instrumented) addInstrumentation(config.instrumented);
-
-      if(config.constructors) {
-        this.config.constructors = _.extend(
-          defaultConfig.constructors,
-          this.config.constructors
-        )
-        if(!config.getTypeOf) 
-          console.warn('You provided a constructors config property but no custom getTypeOf method. ' +
-                        'Backbone-Xray will not be able recognize instances of the constructors you provided.')
-      } 
-
-      // Must use the addAliases method, because the aliases need to be parsed
-      if(config.aliases) this.addAliases.apply(this, config.aliases);
-
-      this.parseEventSpecifiers();
-    },
+    config: $.extend({}, defaults.config),
 
     loggedEvents: (
       function initLoggedEvents() {
@@ -247,37 +460,53 @@
       }()
     ),
 
-   /**
-    * Turn on event logging by supplying event specifiers as arguments. These specifiers
-    * limit logged events to only ones triggered on specified objects and with specified
-    * event names.
-    *
-    * Specifiers can reference an object, a predefined class of objects, or an event name
-    * pattern. Any number of specifier arguments in any order can be supplied. If none
-    * are supplied, event logging is disabled.
-    *
-    * When both object and event name specifiers exist, only events matching both one
-    * of the object specifiers and one of the event name specifiers will be logged.
-    *
-    * When only event name specifiers exist, events triggered on any object matching the
-    * name pattern will be logged.
-    *
-    * When only object specifiers exist, all events triggered on only those objects will
-    * be logged.
-    *
-    * Object specifiers may take any of the following forms:
-    *  - A string of the name of a constructor function (example: 'HotelModel')
-    *  - A reference to a constructor function
-    *  - A string representing a class of objects (example: 'model')
-    *
-    * Event name specifiers may take any of the following forms:
-    *  - A string to be searched for as a substring within event names
-    *  - A regular expression to be matched against event names
-    *
-    * @method logEvents
-    * @param {Object} context The object that will have its dependencies
-    */
+    configure: function(config) {
+      // Omit aliases for now, because the aliases need to be parsed by addAliases
+      this.config = $.extend(true, {}, this.config, _.omit(config, 'aliases'));
+
+      if(config.aliases) this.addAliases.apply(this, config.aliases);
+
+      if(config.instrumented) _addInstrumentation(config.instrumented);
+
+      this.parseEventSpecifiers();
+    },
+
+    help: function() {
+      this.openUi('help');
+    },
+
     logEvents: function() {
+
+     /**
+      * Turn on event logging by supplying event specifiers as arguments. These specifiers
+      * limit logged events to only ones triggered on specified objects and with specified
+      * event names.
+      *
+      * Specifiers can reference an object, a predefined class of objects, or an event name
+      * pattern. Any number of specifier arguments in any order can be supplied. If none
+      * are supplied, event logging is disabled.
+      *
+      * When both object and event name specifiers exist, only events matching both one
+      * of the object specifiers and one of the event name specifiers will be logged.
+      *
+      * When only event name specifiers exist, events triggered on any object matching the
+      * name pattern will be logged.
+      *
+      * When only object specifiers exist, all events triggered on only those objects will
+      * be logged.
+      *
+      * Object specifiers may take any of the following forms:
+      *  - A string of the name of a constructor function (example: 'HotelModel')
+      *  - A reference to a constructor function
+      *  - A string representing a class of objects (example: 'model')
+      *
+      * Event name specifiers may take any of the following forms:
+      *  - A string to be searched for as a substring within event names
+      *  - A regular expression to be matched against event names
+      *
+      * @method logEvents
+      * @param {Object} context The object that will have its dependencies
+      */
 
       if(_.isUndefined(arguments[0])) {
         this.stopLoggingEvents();
@@ -316,7 +545,7 @@
     },
 
     parseEventSpecifiers: function() {
-      var self = this;
+      var self = this,
           loggedEvents = this.loggedEvents = [],
           eventObjMatchers = this.eventObjMatchers = [];
 
@@ -347,7 +576,7 @@
 
       if(xray.persistSettings) {
         xray.applySetting('loggedEvents', loggedEvents);
-        xray.applySetting('eventSpecifiers', _stringifyEventSpecifiers());
+        xray.applySetting('eventSpecifiers', _stringifyEventSpecifiers(this.eventSpecifiers));
       }
 
       eventSpecifiersParsed = true;
@@ -361,13 +590,13 @@
 
     isEventNameLogged: function(eventName) {
       var loggedPatterns = _.select(this.loggedEvents, _isPatternSpecifier),
-          regexes = _.map(loggedPatterns, _patternStrToRegExp);
+          regexes = _.map(loggedPatterns, _patternStrToRegExp),
           eventNameMatches = function(regex) { return regex.test(eventName); };
       return _.isEmpty(loggedPatterns) || _.any(regexes, eventNameMatches);
     },
 
     isConstructorName: function(testStr) {
-      return typeof testStr === 'string' && testStr.match(/^[A-Z]/);
+      return (typeof testStr === 'string' && testStr.match(/^[A-Z]/) !== null);
     },
 
     getLoggedConstructorNames: function() {
@@ -376,7 +605,7 @@
 
     isObjLogged: function(obj) {
       return this.isObjLoggedInstance(obj) || this.doesObjMatchAlias(obj);
-    }, 
+    },
 
     isObjLoggedInstance: function(obj) {
        return _.any(this.getLoggedConstructorNames(), _.bind(_isInstanceOf, this, obj));
@@ -459,7 +688,7 @@
       this.parseEventSpecifiers();
     },
 
-    log: function(obj, name, data, stack, location, timeElapsed) {
+    log: _.throttle(function(obj, name, data, stack, location, timeElapsed) {
       var self = this, c = console, eventInfo;
 
       eventInfo = {
@@ -512,99 +741,11 @@
           c.groupEnd();
         }
       }, this));
-    }
+    }, 100),
+
+    util : util
 
   });
-
-
-  function _compareEventSpecifiers(a, b) {
-    if( (_.isString(a) && a[0].match(/[A-Z]/)) ||
-       _.isFunction(a) ) {
-      return -1;
-    }
-    return 1;
-  }
-
-  function _containsUnexpandedAlias(expanded) {
-    return ~(expanded.join('').indexOf('*'));
-  }
-
-  function _expandEventAliases(alias) {
-    var self = this;
-
-    if(!alias.expanded) {
-      alias.expanded = [alias.name];
-    }
-
-    while(_containsUnexpandedAlias(alias.expanded)) {
-      alias.expanded = _.chain(alias.expanded).map(function(expansion) {
-        var unexpanded = ~expansion.indexOf('*'),
-        resolveKey;
-        if(unexpanded) {
-          resolveKey = expansion.slice(1);
-          return _.findWhere(self.config.aliases, {name: resolveKey}).expanded;
-        }
-        return expansion;
-      }).flatten().uniq().value();
-    }
-
-    return alias;
-  }
-
-  function _isInstanceOf(obj, constr) {
-    constr = typeof constr === 'function' ? constr : this.config.constructors[constr];
-    if(typeof constr !== 'undefined') return (obj instanceof constr);
-    return false;
-  }
-
-  function _isPatternSpecifier(specifier) {
-    return _.isString(specifier) && specifier[0] === '/';
-  }
-
-  function _isValidEventSpecifier() {
-    var self = this,
-    specifiers = _.toArray(arguments);
-    return _.all(specifiers, function(specifier) {
-      return _.any( [ _.isString, _.isRegExp ],
-                   function(test) { return test(specifier); }
-                  );
-    });
-  }
-
-  function _stringifyEventSpecifiers() {
-    var self = this;
-    return _.map(this.eventSpecifiers, function(specifier) {
-      if(specifier instanceof RegExp) return _toRegExpString(specifier);
-      return specifier;
-    });
-  }
-
-  function _patternStrToRegExp(patternStr) {
-    return RegExp(patternStr.slice(1,-1));
-  }
-
-  // We can't store RegExp objects in this.loggedEvents, as identical RegExp
-  // instances aren't ===, so comparison's don't work (WTF ???)
-  function _toRegExpString(pattern) {
-    if(_isPatternSpecifier(pattern.toString())) {
-      return pattern.toString();
-    }
-    else {
-      return '/' + pattern + '/';
-    }
-  }
-
-  [ _compareEventSpecifiers,
-    _containsUnexpandedAlias,
-    _expandEventAliases,
-    _isInstanceOf,
-    _isPatternSpecifier,
-    _isValidEventSpecifier,
-    _stringifyEventSpecifiers,
-    _patternStrToRegExp,
-    _toRegExpString
-  ].forEach(function(f) { f = f.bind(xray); });
- 
 
   // Alias these for semantic convenience
   xray.addFormatter = xray.addFormatters;
@@ -613,7 +754,9 @@
   // Start logging if persistSettings is true
   if(xray.eventSpecifiers.length) xray.startLoggingEvents();
 
+  Backbone.logEvents = _.bind(xray.logEvents, xray);
+
   // Export the module to Backbone in the browser, and AMD and Node via return
   return (Backbone.xray = xray);
-  
+
 }));

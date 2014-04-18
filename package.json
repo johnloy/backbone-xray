@@ -23,7 +23,7 @@
   "main": "backbone.xray",
   "engines": {
     "node": "*"
-  }
+  },
   "devDependencies": {
   },
   "keywords": []
