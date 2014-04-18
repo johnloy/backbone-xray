@@ -46,6 +46,15 @@
   * ## Utilities
   * ======================================================================== */
 
+  // Yuck! Why did Underscore remove the optional >1 arguments for _.bindAll?
+  var _bindAll = function (obj) {
+    var funcs = [].slice.call(arguments, 1);
+    if (funcs.length === 0) {
+      funcs = _.functions(obj);
+    }
+    return _.bindAll.apply(_, [obj].concat(funcs));
+  };
+
   var util = {
 
     parseUri: function(url) {
@@ -319,20 +328,73 @@
 
       constructors : backboneConstructors,
 
-      getTypeOf    : function (obj) {
-        var constructors = this.constructors,
-            constrName;
+      formatters   : [
+        {
+          name: 'model',
+          match: function(xray, eventInfo) {
+            return eventInfo.obj instanceof Backbone.Model;
+          },
+          formatTitle: function(xray, eventInfo) {
+            var label = null,
+                obj = eventInfo.obj,
+                strategies = [
+                  function getName() {
+                    var name = obj.name || _.isFunction(obj.get) ? obj.get('name') : undefined;
+                    return name ? xray.getTypeOf(obj) + '(name: "' + name + '")' : undefined;
+                  },
+                  function getId() {
+                    var obj = eventInfo.obj,
+                        idProp = obj.id ? 'id' : 'cid';
+                    if(obj[idProp]) {
+                      return xray.getTypeOf(obj) + '(' + idProp + ': ' + obj[idProp] + ')';
+                    }
+                  }
+                ].reverse(),
+                i = strategies.length;
 
-        for(constrName in constructors) {
-          if(obj.constructor === constructors[constrName]) return constrName;
+            while(i--) {
+              label = strategies[i]();
+              if(label) return label;
+            }
+          }
+        },
+        {
+          name: 'collection',
+          match: function(xray, eventInfo) {
+            return eventInfo.obj instanceof Backbone.Collection;
+          },
+          formatTitle: function(xray, eventInfo) {
+            var obj = eventInfo.obj;
+            return xray.getTypeOf(obj) + '(length: ' + obj.length + ')';
+          }
+        },
+        {
+          name: 'view',
+          match: function(xray, eventInfo) {
+            return eventInfo.obj instanceof Backbone.View;
+          },
+          formatTitle: function(eventInfo, xray) {
+            var obj = eventInfo.obj;
+            return xray.getTypeOf(obj);
+          }
+        },
+        {
+          name: 'router',
+          match: function(xray, eventInfo) {
+            return eventInfo.obj instanceof Backbone.Router;
+          },
+          formatTitle: function(xray, eventInfo) {
+            var obj = eventInfo.obj;
+            return xray.getTypeOf(obj);
+          }
+        },
+        { name: 'default',
+          match: function() { return true; },
+          formatTitle: function(xray, eventInfo) {
+            return xray.getTypeOf(eventInfo.obj);
+          }
         }
-        for(constrName in constructors) {
-          if(obj instanceof constructors[constrName]) return constrName;
-        }
-        return 'Object';
-      },
-
-      formatters   : [],
+      ],
 
       aliases      : [
         {
@@ -431,6 +493,16 @@
       return '/' + pattern + '/';
     }
   };
+
+  var _formattersReversed = _.memoize(function () {
+    var reversed = [],
+        formatters = xray.config.formatters,
+        len = formatters.length;
+    for (var i = (len - 1); i >= 0; i--) {
+      reversed.push(formatters[i]);
+    }
+    return reversed;
+  });
 
   // Public API
 
@@ -630,64 +702,46 @@
       return this.isObjLogged(obj) && this.isEventNameLogged(eventName, obj);
     },
 
-    defaultEventTitleFormat: function(eventInfo) {
-      var self = this,
-          label = null,
-          obj = eventInfo.obj,
-          strategies = [
-            function getName() {
-              var name = eventInfo.obj.name || _.isFunction(eventInfo.obj.get) ? obj.get('name') : undefined;
-              return name ? self.config.getTypeOf(obj) + '(name: "' + name + '")' : undefined;
-            },
-            function getId() {
-              var obj = eventInfo.obj,
-                  idProp = obj.id ? 'id' : 'cid';
-              if(obj[idProp]) {
-                return self.config.getTypeOf(obj) + '(' + idProp + ': ' + obj[idProp] + ')';
-              }
-            },
-            function getLength() {
-              if(obj instanceof Backbone.Collection) {
-                return self.config.getTypeOf(obj) + '(length: ' + obj.length + ')';
-              }
-            }
-          ].reverse(),
-          i = strategies.length;
-
-      while(i--) {
-        label = strategies[i]();
-        if(label) return label;
-      }
-
-    },
-
     addFormatters: function() {
       var formatters = _.toArray(arguments)
       this.config.formatters = this.config.formatters.concat(formatters);
     },
 
-    getEventFormatter: function(eventInfo) {
-      var formatters = this.config.formatters.reverse(),
-          i = formatters.length,
-          defaultTitleFormatter = _.bind(this.defaultEventTitleFormat, this),
-          matches, title, prependLogContent, appendLogContent,
-          formatTitleMethod, prependLogContentMethod, appendLogContentMethod;
+    getTypeOf: function (obj) {
+      var constructors = this.config.constructors,
+          constrName;
 
-      while(i--) {
-        matches = formatters[i].match(eventInfo);
-        if(matches) {
-          title = formatters[i].formatTitle || defaultTitleFormatter;
-          prependLogContent = formatters[i].prependLogContent || noop;
-          appendLogContent = formatters[i].appendLogContent || noop;
-          break;
-        }
+      for(constrName in constructors) {
+        if(obj.constructor === constructors[constrName]) return constrName;
       }
 
-      return {
-        title: title || defaultTitleFormatter,
-        prependLogContent: prependLogContent || noop,
-        appendLogContent: appendLogContent || noop
-      };
+      for(constrName in constructors) {
+        if(obj instanceof constructors[constrName]) return constrName;
+      }
+
+      return 'Object';
+    },
+
+    getFormatter: function(eventInfo) {
+      var formatters = _formattersReversed(),
+          defaultFormatter = _.findWhere(formatters, { name: 'default' }),
+          i = formatters.length,
+          formatter, matches, title, prependLogContent, appendLogContent,
+          formatTitleMethod, prependLogContentMethod, appendLogContentMethod;
+
+      _bindAll(defaultFormatter);
+
+      while(i--) {
+        matches = _.bind(formatters[i].match, formatters[i])(xray, eventInfo);
+        if(matches) {
+          formatter = _bindAll(formatters[i]);
+          return {
+            title: _.partial(formatter.formatTitle || defaultFormatter.formatTitle, this),
+            prependLogContent: _.partial(formatter.prependLogContent || noop, this),
+            appendLogContent: _.partial(formatter.appendLogContent || noop, this)
+          }
+        }
+      }
     },
 
     addAliases: function() {
@@ -708,7 +762,7 @@
         timeElapsed: timeElapsed
       };
 
-      var formatter = this.getEventFormatter(eventInfo);
+      var formatter = this.getFormatter(eventInfo);
 
       _.defer(_.bind(function(){
         if(xray.settings.logEventNameOnly) {
