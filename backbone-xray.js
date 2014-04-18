@@ -180,7 +180,7 @@
     xray.settings = {};
     xray.persistSettings = persistSettingsOpt;
   }
-
+ 
   xray.applySetting = function(name, val) {
     if(arguments.length == 2 && typeof name === 'string') {
       var settingPair = {};
