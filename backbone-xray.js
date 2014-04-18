@@ -39,6 +39,7 @@
     initPersistedSettings();
     xray.persistSettings = true;
   } else {
+    xray.settings = {};
     xray.persistSettings = persistSettingsOpt;
   } 
 
