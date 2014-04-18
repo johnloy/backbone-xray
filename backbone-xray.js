@@ -508,12 +508,20 @@
       * @param {Object} context The object that will have its dependencies
       */
 
-      if(_.isUndefined(arguments[0])) {
+      if(arguments[0] === null) {
         this.stopLoggingEvents();
         return;
       }
 
-      this.eventSpecifiers = _.toArray(arguments).sort(_compareEventSpecifiers);
+      var eventSpecifiers = null;
+
+      if(arguments && arguments.length && arguments[0] !== '*') {
+        eventSpecifiers = _.toArray(arguments);
+      } else {
+        eventSpecifiers = ['*backbone'];
+      }
+
+      this.eventSpecifiers = eventSpecifiers.sort(_compareEventSpecifiers);
       this.validateEventSpecifiers();
       this.parseEventSpecifiers();
       this.startLoggingEvents();
@@ -524,7 +532,7 @@
     startLoggingEvents: function() {
       if(this.eventSpecifiers.length === 0) {
         throw new Error('No event pattern specifiers have yet been provided. Call Backbone.xray.logEvents() \
-                         with at least one argument before calling Backbone.xray.startLoggingEvents');
+                         before calling Backbone.xray.startLoggingEvents');
       }
 
       if(!eventSpecifiersParsed) {
