@@ -319,6 +319,8 @@
 
     config: {
 
+      throttleTime : 100,
+
       instrumented : [],
 
       constructors : backboneConstructors,
@@ -404,6 +406,61 @@
 
       isRelevantStackLine: function (stackLine) {
        if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
+      },
+
+      log: function (obj, name, data, stack, location, timeElapsed) {
+        var self = this, c = console, eventInfo;
+
+        eventInfo = {
+          obj: obj,
+          name: name,
+          data: data,
+          stack: stack,
+          location: location,
+          timeElapsed: timeElapsed
+        };
+
+        var formatter = this.getFormatter(eventInfo);
+
+        _.defer(_.bind(function(){
+          if(xray.settings.logEventNameOnly) {
+            c.log('Event: %s ❯ %s', formatter.title(eventInfo), name);
+          }
+          else {
+            c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), name);
+
+              formatter.prependLogContent(eventInfo);
+
+              c.log('Triggered on: ', obj);
+
+              if(obj._events && obj._events[eventInfo.name]) {
+                c.groupCollapsed('Listeners: ');
+
+                _.each(obj._events[eventInfo.name], function(listener, i) {
+                  var funcStr = listener.callback.toString();
+                  var funcName = (function() {
+                    var logRef = funcStr.match(/@logref\s(\w+#[a-zA-Z0-9_]+)/);
+                    if(logRef) return logRef[1] + ':';
+                  }());
+
+                  c.groupCollapsed(funcName || '(anonymous): ');
+                    console.log(listener.callback.toString());
+                  c.groupEnd();
+                });
+
+                c.groupEnd();
+              }
+
+              if(location) c.log('At (file:line): ', location);
+              if(data) c.log('Data: ', data);
+              if(timeElapsed) c.log('Time since previous event logged: ' + timeElapsed / 1000 + ' seconds');
+              c.groupCollapsed('Call stack: ');
+                c.log(stack);
+              c.groupEnd();
+              formatter.appendLogContent(eventInfo);
+            c.groupEnd();
+          }
+        }, this));
       }
 
     }
@@ -749,60 +806,12 @@
       this.parseEventSpecifiers();
     },
 
-    log: _.throttle(function(obj, name, data, stack, location, timeElapsed) {
-      var self = this, c = console, eventInfo;
-
-      eventInfo = {
-        obj: obj,
-        name: name,
-        data: data,
-        stack: stack,
-        location: location,
-        timeElapsed: timeElapsed
-      };
-
-      var formatter = this.getFormatter(eventInfo);
-
-      _.defer(_.bind(function(){
-        if(xray.settings.logEventNameOnly) {
-          c.log('Event: %s ❯ %s', formatter.title(eventInfo), name);
-        }
-        else {
-          c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), name);
-
-            formatter.prependLogContent(eventInfo);
-
-            c.log('Triggered on: ', obj);
-
-            if(obj._events && obj._events[eventInfo.name]) {
-              c.groupCollapsed('Listeners: ');
-
-              _.each(obj._events[eventInfo.name], function(listener, i) {
-                var funcStr = listener.callback.toString();
-                var funcName = (function() {
-                  var logRef = funcStr.match(/@logref\s(\w+#[a-zA-Z0-9_]+)/);
-                  if(logRef) return logRef[1] + ':';
-                }());
-
-                c.groupCollapsed(funcName || '(anonymous): ');
-                  console.log(listener.callback.toString());
-                c.groupEnd();
-              });
-
-              c.groupEnd();
-            }
-
-            if(location) c.log('At (file:line): ', location);
-            if(data) c.log('Data: ', data);
-            if(timeElapsed) c.log('Time since previous event logged: ' + timeElapsed / 1000 + ' seconds');
-            c.groupCollapsed('Call stack: ');
-              c.log(stack);
-            c.groupEnd();
-            formatter.appendLogContent(eventInfo);
-          c.groupEnd();
-        }
-      }, this));
-    }, 100),
+    log: function() {
+      var logFunc = _.bind(this.config.log, this);
+      logFunc = _.throttle(logFunc, this.config.throttleTime);
+      logFunc.apply(this, arguments);
+      this.log = logFunc;
+    },
 
     util : util
 
