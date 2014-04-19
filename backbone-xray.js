@@ -256,7 +256,7 @@
           obj: self,
           name: eventName,
           data: data,
-          stack: traceDetails[0],
+          stack: xray.util.stripIndent(traceDetails[0]),
           location: traceDetails[1],
           timeElapsed: timeElapsed 
         };
