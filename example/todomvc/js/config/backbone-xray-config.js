@@ -17,13 +17,14 @@
     },
 
     aliases: [
+
+      // An example of how to match events for objects with certain attributes.
+      // Match events for models with a title containing 'hello'.
       {
-        name: 'all',
-        expanded: ['model', 'collection', 'view', 'router'],
-        match: function(obj, log) {
-          var constrName, objType;
-          constrName = app.typeOf(obj).toLowerCase();
-          return _.any(this.expanded, function(p) { return RegExp(p + '$','i').test(constrName) });
+        name: 'hello-todos',
+        match: function(obj, xray) {
+          var title = obj.get && obj.get('title');
+          return (/hello/i).test(title);
         }
       }
     ]

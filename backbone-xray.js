@@ -491,7 +491,7 @@
   var _expandEventAliases = function (alias) {
 
     if(!alias.expanded) {
-      alias.expanded = [alias.name];
+      alias.expanded = [];
     }
 
     while(_containsUnexpandedAlias(alias.expanded)) {
