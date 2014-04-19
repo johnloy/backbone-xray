@@ -4,6 +4,10 @@
 
     instrumented: [],
 
+    isRelevantStackLine: function(stackline) {
+      return this.defaults.config.isRelevantStackLine(stackline);
+    },
+
     constructors: {
       'AppView'         : app.AppView,
       'TodoView'        : app.TodoView,

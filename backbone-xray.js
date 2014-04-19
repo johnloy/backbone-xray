@@ -213,19 +213,14 @@
   var origTrigger = Backbone.Events.trigger,
       trigger     = origTrigger;
 
-  var _isRelevantLine = function (stackLine) {
-   if( ~stackLine.indexOf('events.js') ||
-       ~stackLine.indexOf('_base.js')) return false;
-   return (/\/javascripts\//).test(stackLine);
-  };
-
   // TODO: Extend this so it isn't totally based on Chrome's error stack implementation
   var _trace = function (){
+    var isRelevantStackLine = _.bind(xray.config.isRelevantStackLine, xray);
 
     try { throw Error(); }
     catch(err) {
       var stackLines = err.stack.split("\n").slice(4),
-          relevantLine = _.find(stackLines, _isRelevantLine),
+          relevantLine = _.find(stackLines, isRelevantStackLine),
           details = [];
 
       details[0] = "\n" + stackLines.join("\n");
@@ -405,7 +400,11 @@
           name: 'backbone-data',
           expanded: ['Model', 'Collection']
         }
-      ]
+      ],
+
+      isRelevantStackLine: function (stackLine) {
+       if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
+      }
 
     }
 

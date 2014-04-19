@@ -141,7 +141,7 @@ Both object and event name specifiers live harmoniously side-by-side as argument
 Backbone.logEvents('Model', 'change:foo', /change:ba$/)
 ```
 
-This terse argument style of configuration, in addition to specifier aliasing, keeps the console typing ceremony to a minimum when activating/configuring logging. The alternative would be a punctuation-heavy object literal argument style, which Backbone-Xray's author (cough) simply thinks is just too much clickity clack.
+This terse argument style of configuration, in addition to specifier aliasing, keeps the console typing ceremony to a minimum when activating/configuring logging. The alternative would be a punctuation-heavy object literal argument style, which is frankly just too much clickity clack for the console.
 
 Just as any number of object specifiers can be passed as arguments to logEvents, any number of event name specifiers can as well, but there's really no need to go crazy with arguments when you can define alias expansions.
 
