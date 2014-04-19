@@ -250,7 +250,20 @@
 
       var traceDetails = _trace();
       _.defer(function() {
-        xray.log(self, eventName, data, traceDetails[0], traceDetails[1], timeElapsed);
+        var eventInfo, formatter;
+
+        eventInfo = {
+          obj: self,
+          name: eventName,
+          data: data,
+          stack: traceDetails[0],
+          location: traceDetails[1],
+          timeElapsed: timeElapsed 
+        };
+
+        formatter = xray.getFormatter(eventInfo);
+
+        xray.log(eventInfo, formatter, console);
       });
     }
 
@@ -408,59 +421,50 @@
        if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
       },
 
-      log: function (obj, name, data, stack, location, timeElapsed) {
-        var self = this, c = console, eventInfo;
+      log: function (eventInfo, formatter, c) {
 
-        eventInfo = {
-          obj: obj,
-          name: name,
-          data: data,
-          stack: stack,
-          location: location,
-          timeElapsed: timeElapsed
-        };
+        if(xray.settings.logEventNameOnly) {
+          c.log('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
+        }
+        else {
+          c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
 
-        var formatter = this.getFormatter(eventInfo);
+            formatter.prependLogContent(eventInfo);
 
-        _.defer(_.bind(function(){
-          if(xray.settings.logEventNameOnly) {
-            c.log('Event: %s ❯ %s', formatter.title(eventInfo), name);
-          }
-          else {
-            c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), name);
+            c.log('Triggered on: ', eventInfo.obj);
 
-              formatter.prependLogContent(eventInfo);
+            if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
+              c.groupCollapsed('Listeners: ');
 
-              c.log('Triggered on: ', obj);
+              _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
+                var funcStr = listener.callback.toString();
+                var funcName = (function() {
+                  var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
+                  if(logRef) return logRef[1] + ':';
+                }());
 
-              if(obj._events && obj._events[eventInfo.name]) {
-                c.groupCollapsed('Listeners: ');
-
-                _.each(obj._events[eventInfo.name], function(listener, i) {
-                  var funcStr = listener.callback.toString();
-                  var funcName = (function() {
-                    var logRef = funcStr.match(/@logref\s(\w+#[a-zA-Z0-9_]+)/);
-                    if(logRef) return logRef[1] + ':';
-                  }());
-
-                  c.groupCollapsed(funcName || '(anonymous): ');
-                    console.log(listener.callback.toString());
-                  c.groupEnd();
-                });
-
+                c.groupCollapsed(funcName || '(anonymous): ');
+                  console.log(listener.callback.toString());
                 c.groupEnd();
-              }
+              });
 
-              if(location) c.log('At (file:line): ', location);
-              if(data) c.log('Data: ', data);
-              if(timeElapsed) c.log('Time since previous event logged: ' + timeElapsed / 1000 + ' seconds');
-              c.groupCollapsed('Call stack: ');
-                c.log(stack);
               c.groupEnd();
-              formatter.appendLogContent(eventInfo);
+            }
+
+            if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
+
+            if(eventInfo.data) c.log('Data: ', eventInfo.data);
+
+            if(eventInfo.timeElapsed) c.log('Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds');
+
+            c.groupCollapsed('Call stack: ');
+              c.log(eventInfo.stack);
             c.groupEnd();
-          }
-        }, this));
+
+            formatter.appendLogContent(eventInfo);
+
+          c.groupEnd();
+        }
       }
 
     }
