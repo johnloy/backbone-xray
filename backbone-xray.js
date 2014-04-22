@@ -142,6 +142,17 @@
       persistedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY),
       persistSettingsOpt = persistedSettings ? true : false;
 
+  var _extractSettings = function () {
+    if(typeof xray.config === 'object') {
+      return {
+        throttleTime: xray.config ? xray.config.throttleTime : xray.defaults.config.throttleTime,
+        eventSpecifiers: xray.eventSpecifiers,
+        loggedEvents: xray.loggedEvents
+      }
+    }
+    return {}
+  };
+
   var _initPersistedSettings = function () {
 
     Object.defineProperty(xray, 'settings', {
@@ -156,7 +167,7 @@
       }
     });
 
-    xray.settings = xray.settings || {};
+    xray.settings = xray.settings || _extractSettings();
   };
 
   var _destroyPersistedSettings = function () {
@@ -239,7 +250,8 @@
         timeElapsed = null;
 
     if( xray.isLoggingEventsFor.call(xray, this, eventName) &&
-        !~eventName.indexOf('xray-logging')) {
+        !~eventName.indexOf('xray-logging') &&
+        !xray.isPaused ) {
 
       var firstTiming = window.performance.getEntriesByName('xray-taken').length === 0;
 
@@ -370,39 +382,46 @@
   };
 
   Instrumentor.prototype.wrapMethod = function(descendant, property) {
-    var methodsParent = descendant.prototype ? descendant.prototype : descendant;
+    var methodsParent = descendant.prototype ? descendant.prototype : descendant,
+        method = methodsParent[property];
 
-    if (methodsParent.hasOwnProperty(property) && typeof methodsParent[property] === 'function') {
+    if (methodsParent.hasOwnProperty(property) && typeof method === 'function' && !method.__xrayInstrumented__) {
       var id = descendant['__xrayName__'] + "#" + property;
-      var original = methodsParent[property];
+      var original = method;
 
       methodsParent[property] = function() {
         var self = this;
         var args = arguments;
 
-        var traceDetails = _trace();
-        _.defer(function() {
-          var eventInfo, formatter;
+        if( xray.isLoggingEventsFor.call(xray, this, id) && !xray.isPaused ) {
+          var traceDetails = _trace();
 
-          eventInfo = {
-            type: 'method',
-            obj: self,
-            name: id,
-            arguments: _.toArray(args),
-            definition: self[property].original.toString(),
-            stack: xray.util.stripIndent(traceDetails[0]),
-            location: traceDetails[1],
-          };
+          _.defer(function() {
+            var eventInfo, formatter;
 
-          formatter = xray.getFormatter(eventInfo);
+            eventInfo = {
+              type: 'method',
+              obj: self,
+              name: id,
+              arguments: _.toArray(args),
+              definition: self[property].original.toString(),
+              stack: xray.util.stripIndent(traceDetails[0]),
+              location: traceDetails[1],
+            };
 
-          xray.log(eventInfo, formatter, console);
-        });
+            formatter = xray.getFormatter(eventInfo);
+
+            xray.log(eventInfo, formatter, console);
+          });
+
+          methodsParent[property]['original'] = original;
+          methodsParent[property]['__xrayInstrumented__'] = true;
+
+        };
 
         return original.apply(self, arguments);
-      };
+      }
 
-      methodsParent[property]['original'] = original;
     }
   };
 
@@ -752,7 +771,7 @@
       this.openUi('help');
     },
 
-    logEvents: function() {
+    focusOn: function() {
 
      /**
       * Turn on event logging by supplying event specifiers as arguments. These specifiers
@@ -781,12 +800,12 @@
       *  - A string to be searched for as a substring within event names
       *  - A regular expression to be matched against event names
       *
-      * @method logEvents
+      * @method focusOn 
       * @param {Object} context The object that will have its dependencies
       */
 
       if(arguments[0] === null) {
-        this.stopLoggingEvents();
+        this.stopLogging();
         return;
       }
 
@@ -801,7 +820,6 @@
       this.eventSpecifiers = eventSpecifiers.sort(_compareEventSpecifiers);
       this.validateEventSpecifiers();
       this.parseEventSpecifiers();
-      this.startLoggingEvents();
 
       return this.loggedEvents;
     },
@@ -818,16 +836,20 @@
       return instrumentors;
     },
 
-    startLoggingEvents: function() {
+    startLogging: function() {
       if(this.eventSpecifiers.length === 0) {
-        throw new Error('No event pattern specifiers have yet been provided. Call Backbone.xray.logEvents() \
-                         before calling Backbone.xray.startLoggingEvents');
+        this.focusOn('*');
+        console.warn('No event pattern specifiers have yet been provided. All events of all objects that implement \
+                      Backbone event\
+                         before calling Backbone.startLogging to ')
       }
+
+      this.isPaused = false;
 
       if(!eventSpecifiersParsed) this.parseEventSpecifiers();
 
       if(!configured) {
-        Backbone.once('xray-configure', function() {
+        Backbone.on('xray-configure', function() {
           Backbone.trigger('xray-logging-start');
         });
       } else {
@@ -835,13 +857,18 @@
       } 
     },
 
-    stopLoggingEvents: function() {
-      Backbone.trigger('xray-logging-stop');
+    stopLogging: function() {
       this.loggedEvents = [];
+      this.eventSpecifiers = [];
+      eventSpecifiersParsed = false;
       xray.removeSetting('loggedEvents');
+      xray.removeSetting('eventSpecifiers');
+      this.isPaused = false;
+      Backbone.trigger('xray-logging-stop');
     },
 
-    pauseLoggingEvents: function() {
+    pauseLogging: function() {
+      this.isPaused = true;
       Backbone.trigger('xray-logging-pause');
     },
 
@@ -987,9 +1014,12 @@
   xray.addAlias = xray.addAliases;
 
   // Start logging if persistSettings is true
-  if(xray.eventSpecifiers.length) xray.startLoggingEvents();
+  if(xray.eventSpecifiers.length) xray.startLogging();
 
-  Backbone.logEvents = _.bind(xray.logEvents, xray);
+  Backbone.focusOn      = _.bind(xray.focusOn, xray);
+  Backbone.startLogging = _.bind(xray.startLogging, xray);
+  Backbone.stopLogging  = _.bind(xray.stopLogging, xray);
+  Backbone.pauseLogging = _.bind(xray.pauseLogging, xray);
 
   // Export the module to Backbone in the browser, and AMD and Node via return
   return (Backbone.xray = xray);
