@@ -21,6 +21,8 @@ var app = app || {};
 		}
 	});
 
-	app.TodoRouter = new TodoRouter();
+	app.TodoRouter = TodoRouter;
+
+  new TodoRouter();
 	Backbone.history.start();
 })();

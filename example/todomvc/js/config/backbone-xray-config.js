@@ -2,7 +2,7 @@
 
   Backbone.xray.configure({
 
-    instrumented: [],
+    instrumented: [app],
 
     isRelevantStackLine: function(stackline) {
       return this.defaults.config.isRelevantStackLine(stackline);

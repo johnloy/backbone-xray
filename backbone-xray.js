@@ -189,7 +189,7 @@
     xray.settings = {};
     xray.persistSettings = persistSettingsOpt;
   }
- 
+
   xray.applySetting = function(name, val) {
     if(arguments.length == 2 && typeof name === 'string') {
       var settingPair = {};
@@ -253,12 +253,13 @@
         var eventInfo, formatter;
 
         eventInfo = {
+          type: 'event',
           obj: self,
           name: eventName,
           data: data,
           stack: xray.util.stripIndent(traceDetails[0]),
           location: traceDetails[1],
-          timeElapsed: timeElapsed 
+          timeElapsed: timeElapsed
         };
 
         formatter = xray.getFormatter(eventInfo);
@@ -271,9 +272,13 @@
   };
 
   var _addInstrumentation = function () {
-    if(xray.config.instrumented) {
-      _.each(xray.instrumented, function(obj) {
-        obj.trigger = _triggerWithLogging;
+    if(xray.instrumentors) {
+      _.each(xray.instrumentors, function(instrumentor) {
+        var instrumentedObj = instrumentor.namespace;
+        instrumentor.activate();
+        if(typeof instrumentedObj.trigger == 'function') {
+          instrumentedObj.trigger = _triggerWithLogging;
+        }
       });
     }
     Backbone.Model.prototype.trigger      =
@@ -283,15 +288,122 @@
   };
 
   var _removeInstrumentation = function () {
-    if(xray.config.instrumented) {
-      _.each(xray.instrumented, function(obj) {
-        obj.trigger = origTrigger;
-      });
-    }
+    // if(xray.config.instrumented) {
+    //   _.each(xray.instrumented, function(obj) {
+    //     obj.trigger = origTrigger;
+    //   });
+    // }
     Backbone.Model.prototype.trigger      =
     Backbone.Collection.prototype.trigger =
     Backbone.View.prototype.trigger       =
     Backbone.Router.prototype.trigger     = origTrigger;
+  };
+
+  var Instrumentor = xray.Instrumentor = function (namespace) {
+    this.namespace = namespace
+    this.descendants = [];
+    this.forbiddenProperties = ['model', 'comparator'];
+    this.findDescendants(this.namespace, 1);
+  }
+
+  Instrumentor.parseInstrumentedObjects = function (instrumented) {
+
+    // Accept a variable number of arguments, but the first must always be:
+    //   * an object reference
+    //   * an array where the first member is an object reference; subsequent members are arguments
+    // instrument(app, foo) instrument events triggered on app and foo
+    // instrument(app, 'TodoView')
+    // instrument(app, /View$/)
+    // instrument(app, 'TodoFoo', /Factory$/)
+    // instrument(app, 'TodoFoo#*', /Factory$/) instrument all methods of TodoFoo and events triggered on TodoFoo and any object whose name ends in Factory
+    // instrument(app, Infinity) traverse all descendants of app
+    // instrument(app, 0, true) instrument only app
+    // instrument(app, 2, true) traverse children and grandchildren, including app
+
+    if(_.isArray(instrumented)) return instrumented;
+
+    return [instrumented];
+  };
+
+  Instrumentor.prototype.activate = function () {
+    var i, len;
+    for (i = 0, len = this.descendants.length; i < len; i++) {
+      this.processDescendant(this.descendants[i]);
+    }
+  };
+
+  Instrumentor.prototype.findDescendants = function(namespace, depth) {
+    if(depth > 3) return;
+
+    var property, nextNameSpace;
+    for (property in namespace) {
+      if (this.isInstrumentableObj(namespace[property])) {
+        namespace[property].__xrayName__ = property;
+        this.descendants.push(namespace[property]);
+      }
+    }
+
+    for (property in namespace) {
+      nextNameSpace = namespace[property];
+      if ($.isPlainObject(nextNameSpace)) {
+        this.findDescendants(nextNameSpace, depth + 1);
+      }
+    }
+  };
+
+  Instrumentor.prototype.isInstrumentableObj = function(property) {
+    return ( property && 
+             !this.isForbiddenProperty(property) && 
+             (typeof(property.__super__) === 'object' || $.isPlainObject(property)) );
+  };
+
+  Instrumentor.prototype.isForbiddenProperty = function(property) {
+    return _.indexOf(this.forbiddenProperties, property) !== -1
+  };
+
+  Instrumentor.prototype.processDescendant = function(descendant) {
+    var methodsParent = descendant.prototype ? descendant.prototype : descendant,
+        property;
+    for (property in methodsParent) {
+      if (!this.isForbiddenProperty(property)) this.wrapMethod(descendant, property);
+    }
+  };
+
+  Instrumentor.prototype.wrapMethod = function(descendant, property) {
+    var methodsParent = descendant.prototype ? descendant.prototype : descendant;
+
+    if (methodsParent.hasOwnProperty(property) && typeof methodsParent[property] === 'function') {
+      var id = descendant['__xrayName__'] + "#" + property;
+      var original = methodsParent[property];
+
+      methodsParent[property] = function() {
+        var self = this;
+        var args = arguments;
+
+        var traceDetails = _trace();
+        _.defer(function() {
+          var eventInfo, formatter;
+
+          eventInfo = {
+            type: 'method',
+            obj: self,
+            name: id,
+            arguments: _.toArray(args),
+            definition: self[property].original.toString(),
+            stack: xray.util.stripIndent(traceDetails[0]),
+            location: traceDetails[1],
+          };
+
+          formatter = xray.getFormatter(eventInfo);
+
+          xray.log(eventInfo, formatter, console);
+        });
+
+        return original.apply(self, arguments);
+      };
+
+      methodsParent[property]['original'] = original;
+    }
   };
 
   Backbone.on('xray-logging-start', _addInstrumentation);
@@ -340,6 +452,15 @@
 
       formatters   : [
         {
+          name: 'method',
+          match: function(xray, eventInfo) {
+            return eventInfo.type === 'method';
+          },
+          formatTitle: function(xray, eventInfo) {
+            return eventInfo.name;
+          }
+        },
+        {
           name: 'model',
           match: function(xray, eventInfo) {
             return eventInfo.obj instanceof Backbone.Model;
@@ -383,7 +504,7 @@
           match: function(xray, eventInfo) {
             return eventInfo.obj instanceof Backbone.View;
           },
-          formatTitle: function(eventInfo, xray) {
+          formatTitle: function(xray, eventInfo) {
             var obj = eventInfo.obj;
             return xray.getTypeOf(obj);
           }
@@ -427,43 +548,57 @@
           c.log('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
         }
         else {
-          c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
-
-            formatter.prependLogContent(eventInfo);
-
-            c.log('Triggered on: ', eventInfo.obj);
-
-            if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
-              c.groupCollapsed('Listeners: ');
-
-              _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
-                var funcStr = listener.callback.toString();
-                var funcName = (function() {
-                  var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
-                  if(logRef) return logRef[1] + ':';
-                }());
-
-                c.groupCollapsed(funcName || '(anonymous): ');
-                  console.log(listener.callback.toString());
-                c.groupEnd();
-              });
-
+          if(eventInfo.type == 'method') {
+            c.groupCollapsed('Method: %s', formatter.title(eventInfo));
+              c.log('Called on: ', eventInfo.obj);
+              c.log('With arguments: ', eventInfo.arguments);
+              c.groupCollapsed('Function body:');
+                c.log(eventInfo.definition);
               c.groupEnd();
-            }
-
-            if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
-
-            if(eventInfo.data) c.log('Data: ', eventInfo.data);
-
-            if(eventInfo.timeElapsed) c.log('Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds');
-
-            c.groupCollapsed('Call stack: ');
-              c.log(eventInfo.stack);
+              if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
+              c.groupCollapsed('Call stack: ');
+                c.log(eventInfo.stack);
+              c.groupEnd();
             c.groupEnd();
+          } else {
+            c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
 
-            formatter.appendLogContent(eventInfo);
+              formatter.prependLogContent(eventInfo);
 
-          c.groupEnd();
+              c.log('Triggered on: ', eventInfo.obj);
+
+              if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
+                c.groupCollapsed('Listeners: ');
+
+                _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
+                  var funcStr = listener.callback.toString();
+                  var funcName = (function() {
+                    var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
+                    if(logRef) return logRef[1] + ':';
+                  }());
+
+                  c.groupCollapsed(funcName || '(anonymous): ');
+                    console.log(listener.callback.toString());
+                  c.groupEnd();
+                });
+
+                c.groupEnd();
+              }
+
+              if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
+
+              if(eventInfo.data) c.log('Data: ', eventInfo.data);
+
+              if(eventInfo.timeElapsed) c.log('Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds');
+
+              c.groupCollapsed('Call stack: ');
+                c.log(eventInfo.stack);
+              c.groupEnd();
+
+              formatter.appendLogContent(eventInfo);
+
+            c.groupEnd();
+          }
         }
       }
 
@@ -476,7 +611,8 @@
   * ## Main API
   * ======================================================================== */
 
-  var eventSpecifiersParsed = false;
+  var eventSpecifiersParsed = false,
+      configured = false;
 
   // Private methods
 
@@ -564,6 +700,10 @@
     return reversed;
   });
 
+  var _resetConfig = function () {
+    return xray.config = $.extend({}, xray.defaults.config);
+  };
+
   // Public API
 
   xray = _.extend(xray, {
@@ -593,14 +733,19 @@
     ),
 
     configure: function(config) {
+      _resetConfig();
+
       // Omit aliases for now, because the aliases need to be parsed by addAliases
       this.config = $.extend(true, {}, this.config, _.omit(config, 'aliases'));
 
       if(config.aliases) this.addAliases.apply(this, config.aliases);
 
-      if(config.instrumented) _addInstrumentation(config.instrumented);
+      if(config.instrumented) this.instrument.apply(this, config.instrumented);
 
-      this.parseEventSpecifiers();
+      if(!eventSpecifiersParsed) this.parseEventSpecifiers();
+
+      configured = true;
+      Backbone.trigger('xray-configure');
     },
 
     help: function() {
@@ -661,17 +806,33 @@
       return this.loggedEvents;
     },
 
+    instrument: function (instrumented) {
+      var instrumentedObjects = Instrumentor.parseInstrumentedObjects(instrumented);
+
+      var instrumentors = _.map(instrumentedObjects, function (namespace) {
+        return new Instrumentor(namespace);
+      });
+
+      this.instrumentors = _.uniq(_.compact(_.union(this.instrumentors, instrumentors)));
+
+      return instrumentors;
+    },
+
     startLoggingEvents: function() {
       if(this.eventSpecifiers.length === 0) {
         throw new Error('No event pattern specifiers have yet been provided. Call Backbone.xray.logEvents() \
                          before calling Backbone.xray.startLoggingEvents');
       }
 
-      if(!eventSpecifiersParsed) {
-        this.parseEventSpecifiers();
-      };
+      if(!eventSpecifiersParsed) this.parseEventSpecifiers();
 
-      Backbone.trigger('xray-logging-start');
+      if(!configured) {
+        Backbone.once('xray-configure', function() {
+          Backbone.trigger('xray-logging-start');
+        });
+      } else {
+        Backbone.trigger('xray-logging-start');
+      } 
     },
 
     stopLoggingEvents: function() {
@@ -812,9 +973,9 @@
 
     log: function() {
       var logFunc = _.bind(this.config.log, this);
-      logFunc = _.throttle(logFunc, this.config.throttleTime);
       logFunc.apply(this, arguments);
       this.log = logFunc;
+      logFunc = _.throttle(logFunc, this.config.throttleTime);
     },
 
     util : util
