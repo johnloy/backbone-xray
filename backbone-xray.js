@@ -389,6 +389,7 @@
       var id = descendant['__xrayName__'] + "#" + property;
       var original = method;
 
+
       methodsParent[property] = function() {
         var self = this;
         var args = arguments;
@@ -418,6 +419,12 @@
           methodsParent[property]['__xrayInstrumented__'] = true;
 
         };
+
+        // The first time delegateEvents was called methods weren't wrapped, 
+        // so we have to call it again.
+        if(property === 'initialize' && descendant.__super__ === Backbone.View.prototype) {
+          this.delegateEvents();
+        }
 
         return original.apply(self, arguments);
       }
