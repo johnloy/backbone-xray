@@ -139,15 +139,17 @@
   * ======================================================================== */
 
   var SETTINGS_STORAGE_KEY = 'backbone-xray.settings',
-      persistedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY),
+      persistedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY)),
       persistSettingsOpt = persistedSettings ? true : false;
+
+  var settingKeys = ['throttleTime', 'eventSpecifiers', 'loggedEvents'];
 
   var _extractSettings = function () {
     if(typeof xray.config === 'object') {
       return {
         throttleTime: xray.config ? xray.config.throttleTime : xray.defaults.config.throttleTime,
-        eventSpecifiers: xray.eventSpecifiers,
-        loggedEvents: xray.loggedEvents
+        eventSpecifiers: xray.eventSpecifiers || null,
+        loggedEvents: xray.loggedEvents || null
       }
     }
     return {}
@@ -155,19 +157,33 @@
 
   var _initPersistedSettings = function () {
 
-    Object.defineProperty(xray, 'settings', {
-      get: function() {
-        var settings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
-        if(!settings) settings = {};
-        return settings;
-      },
-      set: function(settings) {
-        var settingsSerialized = JSON.stringify(settings);
-        localStorage.setItem(SETTINGS_STORAGE_KEY, settingsSerialized);
-      }
+    var settings = {},
+        initialSettings = persistedSettings || _extractSettings();
+
+    _.each(settingKeys, function (key) {
+      Object.defineProperty(settings, key, {
+
+        get: function() {
+          var settings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
+          return settings[key];
+        },
+
+        set: function(setting) {
+          var settings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY)) || {},
+              settingsSerialized;
+          settings[key] = setting;
+          settingsSerialized = JSON.stringify(settings);
+          localStorage.setItem(SETTINGS_STORAGE_KEY, settingsSerialized);
+        }
+
+      });
+
+      settings[key] = initialSettings[key];
+
     });
 
-    xray.settings = xray.settings || _extractSettings();
+    xray.settings = settings;
+
   };
 
   var _destroyPersistedSettings = function () {
@@ -192,16 +208,7 @@
     }
   });
 
-  if(persistedSettings) {
-    xray.settings = persistedSettings;
-    _initPersistedSettings();
-    xray.persistSettings = true;
-  } else {
-    xray.settings = {};
-    xray.persistSettings = persistSettingsOpt;
-  }
-
-  xray.applySetting = function(name, val) {
+  xray.addSetting = function(name, val) {
     if(arguments.length == 2 && typeof name === 'string') {
       var settingPair = {};
       settingPair[name] = val;
@@ -738,25 +745,25 @@
 
     config: $.extend({}, defaults.config),
 
-    loggedEvents: (
-      function initLoggedEvents() {
-        var logSettings = xray.settings;
-        if(logSettings && logSettings.loggedEvents) {
-          return logSettings.loggedEvents;
-        }
-        return [];
-      }()
-    ),
+    loggedEvents: persistedSettings.loggedEvents || [],
+    //   function initLoggedEvents() {
+    //     var logSettings = xray.settings;
+    //     if(logSettings && logSettings.loggedEvents) {
+    //       return logSettings.loggedEvents;
+    //     }
+    //     return [];
+    //   }()
+    // ),
 
-    eventSpecifiers: (
-      function initEventSpecifiers() {
-        var logSettings = xray.settings;
-        if(logSettings && logSettings.eventSpecifiers) {
-          return logSettings.eventSpecifiers;
-        }
-        return [];
-      }()
-    ),
+    eventSpecifiers: persistedSettings.eventSpecifiers || [],
+    //   function initEventSpecifiers() {
+    //     var logSettings = xray.settings;
+    //     if(logSettings && logSettings.eventSpecifiers) {
+    //       return logSettings.eventSpecifiers;
+    //     }
+    //     return [];
+    //   }()
+    // ),
 
     configure: function(config) {
       _resetConfig();
@@ -846,9 +853,8 @@
     startLogging: function() {
       if(this.eventSpecifiers.length === 0) {
         this.focusOn('*');
-        console.warn('No event pattern specifiers have yet been provided. All events of all objects that implement \
-                      Backbone event\
-                         before calling Backbone.startLogging to ')
+        console.warn('No event pattern specifiers have yet been provided. All events for all objects that extend ' +
+                     'Backbone.Model, Backbone.Collection, Backbone.View, and Backbone.Router will be logged.')
       }
 
       this.isPaused = false;
@@ -910,8 +916,8 @@
       this.loggedEvents = _.uniq(loggedEvents);
 
       if(xray.persistSettings) {
-        xray.applySetting('loggedEvents', loggedEvents);
-        xray.applySetting('eventSpecifiers', _stringifyEventSpecifiers(this.eventSpecifiers));
+        xray.settings.loggedEvents = loggedEvents;
+        xray.settings.eventSpecifiers = _stringifyEventSpecifiers(this.eventSpecifiers);
       }
 
       eventSpecifiersParsed = true;
@@ -1016,9 +1022,17 @@
 
   });
 
+
   // Alias these for semantic convenience
   xray.addFormatter = xray.addFormatters;
   xray.addAlias = xray.addAliases;
+
+  if(persistedSettings) {
+    xray.persistSettings = true;
+  } else {
+    xray.settings = null;
+    xray.persistSettings = persistSettingsOpt;
+  }
 
   // Start logging if persistSettings is true
   if(xray.eventSpecifiers.length) xray.startLogging();
