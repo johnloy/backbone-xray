@@ -281,9 +281,7 @@
           timeElapsed: timeElapsed
         };
 
-        formatter = xray.getFormatter(eventInfo);
-
-        xray.log(eventInfo, formatter, console);
+        xray.log(xray.getEntry(eventInfo));
       });
     }
 
@@ -588,6 +586,40 @@
               xray.getTypeOf(obj),
               eventInfo.name
             ];
+          },
+          obj: function(xray, eventInfo) {
+            return [
+              'Triggered on: ',
+              eventInfo.obj
+            ];
+          },
+          listeners: function(xray, eventInfo) {
+
+            if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
+
+              var formatter = ['Listeners: '];
+
+              // c.groupCollapsed('Listeners: ');
+
+              _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
+                var funcStr = listener.callback.toString();
+                var funcName = (function() {
+                  var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
+                  if(logRef) return logRef[1] + ':';
+                }());
+
+                formatter.push(function() {
+                  console.groupCollapsed(funcName || '(anonymous): ');
+                    console.log(listener.callback.toString());
+                  console.groupEnd();
+                });
+
+              });
+
+              // c.groupEnd();
+
+              return formatter;
+            }
           }
         }
       ],
@@ -623,15 +655,30 @@
           //   entry.append();
           // });
 
+        entry.summary(function() {
+          entry.obj();
+          entry.listeners();
+        });
+
+          // entry.summary(function() {
+          //   entry.prepend();
+          //   entry.obj();
+          //   entry.listeners();
+          //   entry.location();
+          //   entry.data();
+          //   entry.timeElapsed();
+          //   entry.stack();
+          //   entry.append();
+          // });
+
         // if(xray.settings.logSummaryOnly) {
         //   formatter.summary(eventInfo);
         // }
         // else {
 
-
           // c.groupCollapsed('Event: %s ❯ %s', formatter.summary(eventInfo), eventInfo.name);
 
-              // formatter.prependLogContent(eventInfo);
+            // formatter.prependLogContent(eventInfo);
 
             // formatter.obj(eventInfo);
 //
@@ -779,7 +826,6 @@
 
     wrappers = {
       summary      : 'log',
-      groupSummary : 'groupCollapsed',
       obj          : 'log',
       listeners    : 'groupCollapsed',
       location     : 'log',
@@ -789,18 +835,29 @@
     };
 
     xray.config.formatters = _.map(formatters, function (formatter) {
-      var methods = [ 'summary', 'groupSummary', 'obj', 'listeners',
+      var methods = [ 'summary', 'obj', 'listeners',
                       'location', 'data', 'timeElapsed', 'stack' ];
-      if(!formatter.groupSummary) {
-        formatter.groupSummary = formatter.summary;
-      }
+
       _.each(methods, function (func) {
         var currMethod = formatter[func];
         if(currMethod) {
-          formatter[func] = _.wrap(currMethod, function(origFunc, xray, eventInfo) {
+          formatter[func] = _.wrap(currMethod, function(origFunc, xray, eventInfo, callback) {
             var args = [].slice.call(arguments).slice(1),
-                origResults = origFunc.call(formatter, xray, eventInfo);
-            console[wrappers[func]].apply(console, origResults);
+                origResults = origFunc.call(formatter, xray, eventInfo),
+                origResultsCallbacks,
+                callbacks;
+
+            origResults = _.reject(origResults, _.isFunction);
+            origResultsCallbacks = _.select(origResults, _.isFunction);
+
+            callbacks = _.union(callback, origResultsCallbacks);
+            console.log(callbacks);
+
+            var consoleMethod = typeof callback === 'function' ? 'groupCollapsed' : 'log';
+            console[consoleMethod].apply(console, origResults);
+            if(consoleMethod === 'log') return;
+            _.each(callbacks, function(f){ f(); });
+            console.groupEnd();
           });
         }
       });
@@ -1042,7 +1099,7 @@
       return 'Object';
     },
 
-    getFormatter: function(eventInfo) {
+    getEntry: function(eventInfo) {
       var formatters = _formattersReversed(),
           defaultFormatter = _.findWhere(formatters, { name: 'default' }),
           i = formatters.length,
@@ -1055,10 +1112,19 @@
         if(matches) {
           formatter = _bindAll(formatters[i]);
           return {
-            summary: _.partial(formatter.summary || defaultFormatter.summary, this),
-            groupSummary: _.partial(formatter.groupSummary || defaultFormatter.groupSummary, this),
-            prependLogContent: _.partial(formatter.prependLogContent || noop, this),
-            appendLogContent: _.partial(formatter.appendLogContent || noop, this)
+
+      // obj          : 'log',
+      // location     : 'log',
+      // data         : 'log',
+      // timeElapsed  : 'log',
+      // stack        : 'groupCollapsed'
+
+
+            listeners : _.partial(formatter.listeners || defaultFormatter.listeners, this, eventInfo),
+            obj: _.partial(formatter.obj || defaultFormatter.obj, this, eventInfo),
+            summary: _.partial(formatter.summary || defaultFormatter.summary, this, eventInfo),
+            prependLogContent: _.partial(formatter.prependLogContent || noop, this, eventInfo),
+            appendLogContent: _.partial(formatter.appendLogContent || noop, this, eventInfo)
           }
         }
       }
