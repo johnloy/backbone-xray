@@ -484,6 +484,15 @@
       constructors : backboneConstructors,
 
       formatters   : [
+        // summary
+        // prepend
+        // obj
+        // listeners
+        // location
+        // data
+        // timeElapsed
+        // stack
+        // append
         {
           name: 'method',
           match: function(xray, eventInfo) {
@@ -498,7 +507,7 @@
           match: function(xray, eventInfo) {
             return eventInfo.obj instanceof Backbone.Model;
           },
-          formatTitle: function(xray, eventInfo) {
+          summary: function(xray, eventInfo) {
             var label = null,
                 obj = eventInfo.obj,
                 strategies = [
@@ -518,7 +527,13 @@
 
             while(i--) {
               label = strategies[i]();
-              if(label) return label;
+              if(label) {
+                return [
+                  'Event: %s ❯ %s',
+                  label,
+                  eventInfo.name
+                ];
+              }
             }
           }
         },
@@ -527,9 +542,13 @@
           match: function(xray, eventInfo) {
             return eventInfo.obj instanceof Backbone.Collection;
           },
-          formatTitle: function(xray, eventInfo) {
+          summary: function(xray, eventInfo) {
             var obj = eventInfo.obj;
-            return xray.getTypeOf(obj) + '(length: ' + obj.length + ')';
+            return [
+              'Event: %s ❯ %s',
+              xray.getTypeOf(obj) + '(length: ' + obj.length + ')',
+              eventInfo.name
+            ];
           }
         },
         {
@@ -537,9 +556,13 @@
           match: function(xray, eventInfo) {
             return eventInfo.obj instanceof Backbone.View;
           },
-          formatTitle: function(xray, eventInfo) {
+          summary: function(xray, eventInfo) {
             var obj = eventInfo.obj;
-            return xray.getTypeOf(obj);
+            return [
+              'Event: %s ❯ %s',
+              xray.getTypeOf(obj),
+              eventInfo.name
+            ];
           }
         },
         {
@@ -547,15 +570,24 @@
           match: function(xray, eventInfo) {
             return eventInfo.obj instanceof Backbone.Router;
           },
-          formatTitle: function(xray, eventInfo) {
+          summary: function(xray, eventInfo) {
             var obj = eventInfo.obj;
-            return xray.getTypeOf(obj);
+            return [
+              'Event: %s ❯ %s',
+              xray.getTypeOf(obj),
+              eventInfo.name
+            ];
           }
         },
         { name: 'default',
           match: function() { return true; },
-          formatTitle: function(xray, eventInfo) {
-            return xray.getTypeOf(eventInfo.obj);
+          summary: function(xray, eventInfo) {
+            var obj = eventInfo.obj;
+            return [
+              'Event: %s ❯ %s',
+              xray.getTypeOf(obj),
+              eventInfo.name
+            ];
           }
         }
       ],
@@ -575,64 +607,66 @@
        if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
       },
 
-      log: function (eventInfo, formatter, c) {
+      // The methods of the entry object are already partially applied with eventInfo
+      // log: function (eventInfo, formatter, c) {
+      log: function (entry) {
+        console.log(arguments);
 
-        if(xray.settings.logEventNameOnly) {
-          c.log('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
-        }
-        else {
-          if(eventInfo.type == 'method') {
-            c.groupCollapsed('Method: %s', formatter.title(eventInfo));
-              c.log('Called on: ', eventInfo.obj);
-              c.log('With arguments: ', eventInfo.arguments);
-              c.groupCollapsed('Function body:');
-                c.log(eventInfo.definition);
-              c.groupEnd();
-              if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
-              c.groupCollapsed('Call stack: ');
-                c.log(eventInfo.stack);
-              c.groupEnd();
-            c.groupEnd();
-          } else {
-            c.groupCollapsed('Event: %s ❯ %s', formatter.title(eventInfo), eventInfo.name);
+          // entry.summary(function() {
+          //   entry.prepend();
+          //   entry.obj();
+          //   entry.listeners();
+          //   entry.location();
+          //   entry.data();
+          //   entry.timeElapsed();
+          //   entry.stack();
+          //   entry.append();
+          // });
 
-              formatter.prependLogContent(eventInfo);
+        // if(xray.settings.logSummaryOnly) {
+        //   formatter.summary(eventInfo);
+        // }
+        // else {
 
-              c.log('Triggered on: ', eventInfo.obj);
 
-              if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
-                c.groupCollapsed('Listeners: ');
+          // c.groupCollapsed('Event: %s ❯ %s', formatter.summary(eventInfo), eventInfo.name);
 
-                _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
-                  var funcStr = listener.callback.toString();
-                  var funcName = (function() {
-                    var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
-                    if(logRef) return logRef[1] + ':';
-                  }());
+              // formatter.prependLogContent(eventInfo);
 
-                  c.groupCollapsed(funcName || '(anonymous): ');
-                    console.log(listener.callback.toString());
-                  c.groupEnd();
-                });
+            // formatter.obj(eventInfo);
+//
+//             if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
+//               c.groupCollapsed('Listeners: ');
+//
+//               _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
+//                 var funcStr = listener.callback.toString();
+//                 var funcName = (function() {
+//                   var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
+//                   if(logRef) return logRef[1] + ':';
+//                 }());
+//
+//                 c.groupCollapsed(funcName || '(anonymous): ');
+//                   console.log(listener.callback.toString());
+//                 c.groupEnd();
+//               });
+//
+//               c.groupEnd();
+//             }
+//
+//             if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
+//
+//             if(eventInfo.data) c.log('Data: ', eventInfo.data);
+//
+//             if(eventInfo.timeElapsed) c.log('Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds');
+//
+//             c.groupCollapsed('Call stack: ');
+//               c.log(eventInfo.stack);
+//             c.groupEnd();
+//
+//             formatter.appendLogContent(eventInfo);
 
-                c.groupEnd();
-              }
-
-              if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
-
-              if(eventInfo.data) c.log('Data: ', eventInfo.data);
-
-              if(eventInfo.timeElapsed) c.log('Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds');
-
-              c.groupCollapsed('Call stack: ');
-                c.log(eventInfo.stack);
-              c.groupEnd();
-
-              formatter.appendLogContent(eventInfo);
-
-            c.groupEnd();
-          }
-        }
+          // c.groupEnd();
+        // }
       }
 
     }
@@ -645,7 +679,8 @@
   * ======================================================================== */
 
   var eventSpecifiersParsed = false,
-      configured = false;
+      configured = false,
+      formattersWrapped = false;
 
   // Private methods
 
@@ -737,6 +772,45 @@
     return xray.config = $.extend({}, xray.defaults.config);
   };
 
+  var _wrapFormatters = function () {
+    var formatters = xray.config.formatters,
+        c = console,
+        wrappers;
+
+    wrappers = {
+      summary      : 'log',
+      groupSummary : 'groupCollapsed',
+      obj          : 'log',
+      listeners    : 'groupCollapsed',
+      location     : 'log',
+      data         : 'log',
+      timeElapsed  : 'log',
+      stack        : 'groupCollapsed'
+    };
+
+    xray.config.formatters = _.map(formatters, function (formatter) {
+      var methods = [ 'summary', 'groupSummary', 'obj', 'listeners',
+                      'location', 'data', 'timeElapsed', 'stack' ];
+      if(!formatter.groupSummary) {
+        formatter.groupSummary = formatter.summary;
+      }
+      _.each(methods, function (func) {
+        var currMethod = formatter[func];
+        if(currMethod) {
+          formatter[func] = _.wrap(currMethod, function(origFunc, xray, eventInfo) {
+            var args = [].slice.call(arguments).slice(1),
+                origResults = origFunc.call(formatter, xray, eventInfo);
+            console[wrappers[func]].apply(console, origResults);
+          });
+        }
+      });
+      return formatter;
+    });
+
+    formattersWrapped = true;
+
+  };
+
   // Public API
 
   xray = _.extend(xray, {
@@ -746,24 +820,8 @@
     config: $.extend({}, defaults.config),
 
     loggedEvents: persistedSettings.loggedEvents || [],
-    //   function initLoggedEvents() {
-    //     var logSettings = xray.settings;
-    //     if(logSettings && logSettings.loggedEvents) {
-    //       return logSettings.loggedEvents;
-    //     }
-    //     return [];
-    //   }()
-    // ),
 
     eventSpecifiers: persistedSettings.eventSpecifiers || [],
-    //   function initEventSpecifiers() {
-    //     var logSettings = xray.settings;
-    //     if(logSettings && logSettings.eventSpecifiers) {
-    //       return logSettings.eventSpecifiers;
-    //     }
-    //     return [];
-    //   }()
-    // ),
 
     configure: function(config) {
       _resetConfig();
@@ -860,6 +918,7 @@
       this.isPaused = false;
 
       if(!eventSpecifiersParsed) this.parseEventSpecifiers();
+      if(!formattersWrapped) _wrapFormatters();
 
       if(!configured) {
         Backbone.on('xray-configure', function() {
@@ -987,8 +1046,7 @@
       var formatters = _formattersReversed(),
           defaultFormatter = _.findWhere(formatters, { name: 'default' }),
           i = formatters.length,
-          formatter, matches, title, prependLogContent, appendLogContent,
-          formatTitleMethod, prependLogContentMethod, appendLogContentMethod;
+          formatter, matches;
 
       _bindAll(defaultFormatter);
 
@@ -997,7 +1055,8 @@
         if(matches) {
           formatter = _bindAll(formatters[i]);
           return {
-            title: _.partial(formatter.formatTitle || defaultFormatter.formatTitle, this),
+            summary: _.partial(formatter.summary || defaultFormatter.summary, this),
+            groupSummary: _.partial(formatter.groupSummary || defaultFormatter.groupSummary, this),
             prependLogContent: _.partial(formatter.prependLogContent || noop, this),
             appendLogContent: _.partial(formatter.appendLogContent || noop, this)
           }
