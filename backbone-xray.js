@@ -269,7 +269,7 @@
 
       var traceDetails = _trace();
       _.defer(function() {
-        var eventInfo, formatter;
+        var eventInfo, entry;
 
         eventInfo = {
           type: 'event',
@@ -403,7 +403,7 @@
           var traceDetails = _trace();
 
           _.defer(function() {
-            var eventInfo, formatter;
+            var eventInfo, entry;
 
             eventInfo = {
               type: 'method',
@@ -415,9 +415,9 @@
               location: traceDetails[1],
             };
 
-            formatter = xray.getFormatter(eventInfo);
+            entry = xray.getEntry(eventInfo);
 
-            xray.log(eventInfo, formatter, console);
+            xray.log(entry);
           });
 
           methodsParent[property]['original'] = original;
@@ -496,8 +496,8 @@
           match: function(xray, eventInfo) {
             return eventInfo.type === 'method';
           },
-          formatTitle: function(xray, eventInfo) {
-            return eventInfo.name;
+          summary: function(xray, eventInfo) {
+            return ['Method: ' + eventInfo.name];
           }
         },
         {
