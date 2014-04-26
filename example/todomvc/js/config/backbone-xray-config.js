@@ -27,6 +27,15 @@
           return (/hello/i).test(title);
         }
       }
+    ],
+
+    formatters: [
+      {
+        name: 'method',
+        prepend: function() {
+          return ['prepended content'];
+        }
+      }
     ]
   });
 

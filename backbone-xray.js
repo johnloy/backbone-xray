@@ -281,7 +281,7 @@
           timeElapsed: timeElapsed
         };
 
-        xray.log(xray.getEntry(eventInfo));
+        xray.log(xray.getEntry(eventInfo), eventInfo);
       });
     }
 
@@ -369,8 +369,8 @@
   };
 
   Instrumentor.prototype.isInstrumentableObj = function(property) {
-    return ( property && 
-             !this.isForbiddenProperty(property) && 
+    return ( property &&
+             !this.isForbiddenProperty(property) &&
              (typeof(property.__super__) === 'object' || $.isPlainObject(property)) );
   };
 
@@ -417,7 +417,7 @@
 
             entry = xray.getEntry(eventInfo);
 
-            xray.log(entry);
+            xray.log(entry, eventInfo);
           });
 
           methodsParent[property]['original'] = original;
@@ -425,7 +425,7 @@
 
         };
 
-        // The first time delegateEvents was called methods weren't wrapped, 
+        // The first time delegateEvents was called methods weren't wrapped,
         // so we have to call it again.
         if(property === 'initialize' && descendant.__super__ === Backbone.View.prototype) {
           this.delegateEvents();
@@ -482,23 +482,30 @@
       constructors : backboneConstructors,
 
       formatters   : [
-        // summary
-        // prepend
-        // obj
-        // listeners
-        // location
-        // data
-        // timeElapsed
-        // stack
-        // append
         {
           name: 'method',
+
           match: function(xray, eventInfo) {
             return eventInfo.type === 'method';
           },
+
           summary: function(xray, eventInfo) {
             return ['Method: ' + eventInfo.name];
-          }
+          },
+
+          obj: function(xray, eventInfo) {
+            return [ 'Called on: ', eventInfo.obj ];
+          },
+
+          arguments: function(xray, eventInfo) {
+            return ['Arguments: ', eventInfo.arguments]
+          },
+
+          definition: function(xray, eventInfo) {
+            return ['Definition:', function() {
+              console.log(eventInfo.definition);
+            }];
+          } 
         },
         {
           name: 'model',
@@ -579,27 +586,21 @@
         },
         { name: 'default',
           match: function() { return true; },
+
           summary: function(xray, eventInfo) {
             var obj = eventInfo.obj;
-            return [
-              'Event: %s ❯ %s',
-              xray.getTypeOf(obj),
-              eventInfo.name
-            ];
+            return [ 'Event: %s ❯ %s', xray.getTypeOf(obj), eventInfo.name ];
           },
+
           obj: function(xray, eventInfo) {
-            return [
-              'Triggered on: ',
-              eventInfo.obj
-            ];
+            return [ 'Triggered on: ', eventInfo.obj ];
           },
+
           listeners: function(xray, eventInfo) {
 
             if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
 
               var formatter = ['Listeners: '];
-
-              // c.groupCollapsed('Listeners: ');
 
               _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
                 var funcStr = listener.callback.toString();
@@ -616,11 +617,33 @@
 
               });
 
-              // c.groupEnd();
-
               return formatter;
             }
-          }
+          },
+
+          data: function(xray, eventInfo) {
+            return [ 'Data: ', eventInfo.data ];
+          },
+
+          location: function(xray, eventInfo) {
+            return [ 'At (file:line): ' + eventInfo.location ];
+          },
+
+          timeElapsed: function(xray, eventInfo) {
+            return [ 'Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds' ];
+          },
+
+          stack: function(xray, eventInfo) {
+            return [
+              'Call stack: ',
+              function() {
+                console.log(eventInfo.stack);
+              }
+            ];
+          },
+
+          prepend: noop,
+          append: noop
         }
       ],
 
@@ -639,81 +662,31 @@
        if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
       },
 
-      // The methods of the entry object are already partially applied with eventInfo
-      // log: function (eventInfo, formatter, c) {
-      log: function (entry) {
-        console.log(arguments);
+      log: function (entry, eventInfo) {
 
-          // entry.summary(function() {
-          //   entry.prepend();
-          //   entry.obj();
-          //   entry.listeners();
-          //   entry.location();
-          //   entry.data();
-          //   entry.timeElapsed();
-          //   entry.stack();
-          //   entry.append();
-          // });
-
-        entry.summary(function() {
-          entry.obj();
-          entry.listeners();
-        });
-
-          // entry.summary(function() {
-          //   entry.prepend();
-          //   entry.obj();
-          //   entry.listeners();
-          //   entry.location();
-          //   entry.data();
-          //   entry.timeElapsed();
-          //   entry.stack();
-          //   entry.append();
-          // });
-
-        // if(xray.settings.logSummaryOnly) {
-        //   formatter.summary(eventInfo);
-        // }
-        // else {
-
-          // c.groupCollapsed('Event: %s ❯ %s', formatter.summary(eventInfo), eventInfo.name);
-
-            // formatter.prependLogContent(eventInfo);
-
-            // formatter.obj(eventInfo);
-//
-//             if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
-//               c.groupCollapsed('Listeners: ');
-//
-//               _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
-//                 var funcStr = listener.callback.toString();
-//                 var funcName = (function() {
-//                   var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
-//                   if(logRef) return logRef[1] + ':';
-//                 }());
-//
-//                 c.groupCollapsed(funcName || '(anonymous): ');
-//                   console.log(listener.callback.toString());
-//                 c.groupEnd();
-//               });
-//
-//               c.groupEnd();
-//             }
-//
-//             if(eventInfo.location) c.log('At (file:line): ', eventInfo.location);
-//
-//             if(eventInfo.data) c.log('Data: ', eventInfo.data);
-//
-//             if(eventInfo.timeElapsed) c.log('Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds');
-//
-//             c.groupCollapsed('Call stack: ');
-//               c.log(eventInfo.stack);
-//             c.groupEnd();
-//
-//             formatter.appendLogContent(eventInfo);
-
-          // c.groupEnd();
-        // }
+        if(eventInfo.type === 'event') {
+          entry.summary(function() {
+            entry.prepend();
+            entry.obj();
+            entry.location();
+            entry.data();
+            entry.listeners();
+            entry.timeElapsed();
+            entry.stack();
+            entry.append();
+          });
+        } else {
+          entry.summary(function() {
+            entry.prepend();
+            entry.obj();
+            entry.arguments();
+            entry.location();
+            entry.definition();
+            entry.timeElapsed();
+            entry.stack();
+            entry.append();
+          });
+        }
       }
 
     }
@@ -727,7 +700,8 @@
 
   var eventSpecifiersParsed = false,
       configured = false,
-      formattersWrapped = false;
+      formattersWrapped = false,
+      formatterNames = [];
 
   // Private methods
 
@@ -821,43 +795,36 @@
 
   var _wrapFormatters = function () {
     var formatters = xray.config.formatters,
-        c = console,
-        wrappers;
+        c = console;
 
-    wrappers = {
-      summary      : 'log',
-      obj          : 'log',
-      listeners    : 'groupCollapsed',
-      location     : 'log',
-      data         : 'log',
-      timeElapsed  : 'log',
-      stack        : 'groupCollapsed'
-    };
+    formatterNames = _.chain(formatters).map(function(formatter) {
+      return _.keys(_.omit(formatter, 'name', 'match'));
+    }).flatten().uniq().value();
 
     xray.config.formatters = _.map(formatters, function (formatter) {
-      var methods = [ 'summary', 'obj', 'listeners',
-                      'location', 'data', 'timeElapsed', 'stack' ];
 
-      _.each(methods, function (func) {
-        var currMethod = formatter[func];
+      _.each(formatterNames, function (name) {
+        var currMethod = formatter[name];
         if(currMethod) {
-          formatter[func] = _.wrap(currMethod, function(origFunc, xray, eventInfo, callback) {
+          formatter[name] = _.wrap(currMethod, function(origFunc, xray, eventInfo, callback) {
             var args = [].slice.call(arguments).slice(1),
                 origResults = origFunc.call(formatter, xray, eventInfo),
+                origResultsMsg,
                 origResultsCallbacks,
                 callbacks;
 
-            origResults = _.reject(origResults, _.isFunction);
+            origResultsMsg = _.reject(origResults, _.isFunction);
             origResultsCallbacks = _.select(origResults, _.isFunction);
 
-            callbacks = _.union(callback, origResultsCallbacks);
-            console.log(callbacks);
+            callbacks = _.compact(_.union(callback, origResultsCallbacks));
 
-            var consoleMethod = typeof callback === 'function' ? 'groupCollapsed' : 'log';
-            console[consoleMethod].apply(console, origResults);
-            if(consoleMethod === 'log') return;
-            _.each(callbacks, function(f){ f(); });
-            console.groupEnd();
+            if(callbacks.length) {
+              console.groupCollapsed.apply(console, origResultsMsg);
+              _.each(callbacks, function(f){ f(); });
+              console.groupEnd();
+            } else {
+              console.log.apply(console, origResults);
+            }
           });
         }
       });
@@ -929,7 +896,7 @@
       *  - A string to be searched for as a substring within event names
       *  - A regular expression to be matched against event names
       *
-      * @method focusOn 
+      * @method focusOn
       * @param {Object} context The object that will have its dependencies
       */
 
@@ -983,7 +950,7 @@
         });
       } else {
         Backbone.trigger('xray-logging-start');
-      } 
+      }
     },
 
     stopLogging: function() {
@@ -1111,21 +1078,10 @@
         matches = _.bind(formatters[i].match, formatters[i])(xray, eventInfo);
         if(matches) {
           formatter = _bindAll(formatters[i]);
-          return {
-
-      // obj          : 'log',
-      // location     : 'log',
-      // data         : 'log',
-      // timeElapsed  : 'log',
-      // stack        : 'groupCollapsed'
-
-
-            listeners : _.partial(formatter.listeners || defaultFormatter.listeners, this, eventInfo),
-            obj: _.partial(formatter.obj || defaultFormatter.obj, this, eventInfo),
-            summary: _.partial(formatter.summary || defaultFormatter.summary, this, eventInfo),
-            prependLogContent: _.partial(formatter.prependLogContent || noop, this, eventInfo),
-            appendLogContent: _.partial(formatter.appendLogContent || noop, this, eventInfo)
-          }
+          return _.reduce(formatterNames, function(entry, formatterName) {
+            entry[formatterName] = _.partial(formatter[formatterName] || defaultFormatter[formatterName], xray, eventInfo);
+            return entry;
+          }, {});
         }
       }
     },
