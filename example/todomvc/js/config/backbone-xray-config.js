@@ -2,7 +2,7 @@
 
   Backbone.xray.configure({
 
-    instrumented: [app],
+    instrumented: ['app'],
 
     isRelevantStackLine: function(stackline) {
       return this.defaults.config.isRelevantStackLine(stackline);
@@ -30,10 +30,19 @@
     ],
 
     formatters: [
+      // {
+      //   name: 'method',
+      //   summary: function() {
+      //     return ['yay'];
+      //   }
+      // },
       {
-        name: 'method',
+        name: 'collection',
         prepend: function() {
-          return ['prepended content'];
+          return ['%cprepended content', 'color: white; background: #000; border-radius: 24px; padding: 2px 5px;'];
+        },
+        foo: function() {
+          return ['foo']
         }
       }
     ]

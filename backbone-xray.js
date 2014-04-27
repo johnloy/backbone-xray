@@ -317,40 +317,39 @@
   };
 
   var Instrumentor = xray.Instrumentor = function (namespace) {
-    this.namespace = namespace
+    this.namespace = namespace;
+    namespace[1].__xrayName__ = namespace[0];
     this.descendants = [];
     this.forbiddenProperties = ['model', 'comparator'];
-    this.findDescendants(this.namespace, 1);
+    this.findDescendants(this.namespace[1], 1);
   }
 
   Instrumentor.parseInstrumentedObjects = function (instrumented) {
+    var parsed = _.map(instrumented, function(objChainStr) {
+      var objChain = objChainStr.split('.'),
+          objChainLength = objChain;
 
-    // Accept a variable number of arguments, but the first must always be:
-    //   * an object reference
-    //   * an array where the first member is an object reference; subsequent members are arguments
-    // instrument(app, foo) instrument events triggered on app and foo
-    // instrument(app, 'TodoView')
-    // instrument(app, /View$/)
-    // instrument(app, 'TodoFoo', /Factory$/)
-    // instrument(app, 'TodoFoo#*', /Factory$/) instrument all methods of TodoFoo and events triggered on TodoFoo and any object whose name ends in Factory
-    // instrument(app, Infinity) traverse all descendants of app
-    // instrument(app, 0, true) instrument only app
-    // instrument(app, 2, true) traverse children and grandchildren, including app
+      return _.reduce(objChain, function(currObj, identifier) {
+        return currObj[identifier];
+      }, window);
+    });
 
-    if(_.isArray(instrumented)) return instrumented;
+    parsed = _.zip(instrumented, parsed);
 
-    return [instrumented];
+    return parsed;
   };
 
   Instrumentor.prototype.activate = function () {
     var i, len;
+    this.processDescendant(this.namespace[1]);
     for (i = 0, len = this.descendants.length; i < len; i++) {
       this.processDescendant(this.descendants[i]);
     }
   };
 
   Instrumentor.prototype.findDescendants = function(namespace, depth) {
-    if(depth > 3) return;
+    // Prevent a stack overflow
+    if(depth > 10) return;
 
     var property, nextNameSpace;
     for (property in namespace) {
@@ -394,6 +393,8 @@
       var id = descendant['__xrayName__'] + "#" + property;
       var original = method;
 
+      // We don't want to wrap constructor functions. Assume a constructor if the prototype has properties.
+      if(!_.isEmpty(method.prototype)) return;
 
       methodsParent[property] = function() {
         var self = this;
@@ -701,7 +702,7 @@
   var eventSpecifiersParsed = false,
       configured = false,
       formattersWrapped = false,
-      formatterNames = [];
+      formatterFieldNames = [];
 
   // Private methods
 
@@ -793,17 +794,23 @@
     return xray.config = $.extend({}, xray.defaults.config);
   };
 
-  var _wrapFormatters = function () {
-    var formatters = xray.config.formatters,
-        c = console;
+  var _addFormatterFieldNames = function (formatters) {
+    formatterFieldNames = _.uniq(formatterFieldNames.concat(
+      _.chain(formatters).map(function(formatter) {
+        return _.keys(_.omit(formatter, 'name', 'match'));
+      }).flatten().uniq().value()
+    ));
+  };
 
-    formatterNames = _.chain(formatters).map(function(formatter) {
-      return _.keys(_.omit(formatter, 'name', 'match'));
-    }).flatten().uniq().value();
+  var _wrapFormatters = function (formatters) {
+    var wrappedFormatters;
 
-    xray.config.formatters = _.map(formatters, function (formatter) {
+    formatters = formatters || xray.config.formatters;
+    _addFormatterFieldNames(formatters);
 
-      _.each(formatterNames, function (name) {
+    wrappedFormatters = _.map(formatters, function (formatter) {
+
+      _.each(formatterFieldNames, function (name) {
         var currMethod = formatter[name];
         if(currMethod) {
           formatter[name] = _.wrap(currMethod, function(origFunc, xray, eventInfo, callback) {
@@ -833,6 +840,7 @@
 
     formattersWrapped = true;
 
+    return wrappedFormatters;
   };
 
   // Public API
@@ -851,9 +859,11 @@
       _resetConfig();
 
       // Omit aliases for now, because the aliases need to be parsed by addAliases
-      this.config = $.extend(true, {}, this.config, _.omit(config, 'aliases'));
+      this.config = $.extend(true, {}, this.config, _.omit(config, 'aliases', 'formatters'));
 
       if(config.aliases) this.addAliases.apply(this, config.aliases);
+
+      if(config.formatters) this.addFormatters.apply(this, config.formatters);
 
       if(config.instrumented) this.instrument.apply(this, config.instrumented);
 
@@ -920,8 +930,8 @@
       return this.loggedEvents;
     },
 
-    instrument: function (instrumented) {
-      var instrumentedObjects = Instrumentor.parseInstrumentedObjects(instrumented);
+    instrument: function () {
+      var instrumentedObjects = Instrumentor.parseInstrumentedObjects(_.toArray(arguments));
 
       var instrumentors = _.map(instrumentedObjects, function (namespace) {
         return new Instrumentor(namespace);
@@ -942,7 +952,7 @@
       this.isPaused = false;
 
       if(!eventSpecifiersParsed) this.parseEventSpecifiers();
-      if(!formattersWrapped) _wrapFormatters();
+      if(!formattersWrapped) this.config.formatters = _wrapFormatters();
 
       if(!configured) {
         Backbone.on('xray-configure', function() {
@@ -1047,8 +1057,24 @@
     },
 
     addFormatters: function() {
-      var formatters = _.toArray(arguments)
-      this.config.formatters = this.config.formatters.concat(formatters);
+      var self = this,
+          addedFormatters = _wrapFormatters(_.toArray(arguments)),
+          addedFormatterNames = _.pluck(addedFormatters, 'name'),
+          formatterNames = _.pluck(this.config.formatters, 'name');
+
+      _addFormatterFieldNames(addedFormatters);
+
+      if(_.intersection(addedFormatterNames, formatterNames) != 0) {
+        _.each(addedFormatterNames, function(formatterName) {
+           var newFormatter = _.findWhere(addedFormatters, { name: formatterName }),
+               oldFormatter = _.findWhere(self.config.formatters, { name: formatterName }),
+               newFormatterFunctions = _.omit(newFormatter, name);
+           _.extend(oldFormatter, newFormatterFunctions);
+        });
+      } else {
+        this.config.formatters = this.config.formatters.concat(addedFormatters);
+      }
+
     },
 
     getTypeOf: function (obj) {
@@ -1078,7 +1104,7 @@
         matches = _.bind(formatters[i].match, formatters[i])(xray, eventInfo);
         if(matches) {
           formatter = _bindAll(formatters[i]);
-          return _.reduce(formatterNames, function(entry, formatterName) {
+          return _.reduce(formatterFieldNames, function(entry, formatterName) {
             entry[formatterName] = _.partial(formatter[formatterName] || defaultFormatter[formatterName], xray, eventInfo);
             return entry;
           }, {});
