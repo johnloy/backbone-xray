@@ -228,8 +228,24 @@
   * ## Instrumentation of Backbone.Events.trigger and other arbitrary methods
   * ======================================================================== */
 
-  var origTrigger = Backbone.Events.trigger,
-      trigger     = origTrigger;
+  var origTrigger  = Backbone.Events.trigger,
+      trigger      = origTrigger,
+      logQueue     = [],
+      defaultThrottleTime = 100,
+      _writeLogEntry = { unthrottled: null, throttled: null };
+
+  _writeLogEntry.unthrottled = function (eventInfo) {
+      var eventInfo = logQueue.shift();
+      xray.log(xray.getEntry(eventInfo), eventInfo);
+      if(logQueue.length) _writeLogEntry.throttled();
+  };
+
+  _writeLogEntry.throttled = _.throttle(_writeLogEntry.unthrottled, defaultThrottleTime);
+
+  var _queueLogEntry = function (eventInfo) {
+    logQueue.push(eventInfo);
+    _writeLogEntry.throttled();
+  };
 
   // TODO: Extend this so it isn't totally based on Chrome's error stack implementation
   var _trace = function (){
@@ -261,28 +277,25 @@
         !xray.isPaused ) {
 
       var firstTiming = window.performance.getEntriesByName('xray-taken').length === 0;
-
       if(!firstTiming) {
         timeElapsed =  window.performance.now() - _.last(window.performance.getEntriesByType('mark')).startTime;
       }
       window.performance.mark('xray-taken');
 
+
       var traceDetails = _trace();
-      _.defer(function() {
-        var eventInfo, entry;
 
-        eventInfo = {
-          type: 'event',
-          obj: self,
-          name: eventName,
-          data: data,
-          stack: xray.util.stripIndent(traceDetails[0]),
-          location: traceDetails[1],
-          timeElapsed: timeElapsed
-        };
+      var eventInfo = {
+        type: 'event',
+        obj: self,
+        name: eventName,
+        data: data,
+        stack: xray.util.stripIndent(traceDetails[0]),
+        location: traceDetails[1],
+        timeElapsed: timeElapsed
+      };
 
-        xray.log(xray.getEntry(eventInfo), eventInfo);
-      });
+      _.defer(_.partial(_queueLogEntry, eventInfo));
     }
 
     origTrigger.apply(this, arguments);
@@ -401,28 +414,23 @@
         var args = arguments;
 
         if( xray.isLoggingEventsFor.call(xray, this, id) && !xray.isPaused ) {
-          var traceDetails = _trace();
-
-          _.defer(function() {
-            var eventInfo, entry;
-
-            eventInfo = {
-              type: 'method',
-              obj: self,
-              name: id,
-              arguments: _.toArray(args),
-              definition: self[property].original.toString(),
-              stack: xray.util.stripIndent(traceDetails[0]),
-              location: traceDetails[1],
-            };
-
-            entry = xray.getEntry(eventInfo);
-
-            xray.log(entry, eventInfo);
-          });
 
           methodsParent[property]['original'] = original;
           methodsParent[property]['__xrayInstrumented__'] = true;
+
+          var traceDetails = _trace();
+
+          var eventInfo = {
+            type: 'method',
+            obj: self,
+            name: id,
+            arguments: _.toArray(args),
+            definition: self[property].original.toString(),
+            stack: xray.util.stripIndent(traceDetails[0]),
+            location: traceDetails[1],
+          };
+
+          _.defer(_.partial(_queueLogEntry, eventInfo));
 
         };
 
@@ -476,7 +484,7 @@
 
     config: {
 
-      throttleTime : 100,
+      throttleTime : defaultThrottleTime,
 
       instrumented : [],
 
@@ -701,8 +709,8 @@
 
   var eventSpecifiersParsed = false,
       configured = false,
-      formattersWrapped = false,
-      formatterFieldNames = [];
+      formatterFieldNames = [],
+      logAllObjects = false;
 
   // Private methods
 
@@ -749,6 +757,10 @@
     return _.isString(specifier) && specifier[0] === '/';
   };
 
+  var _isEventNameSpecifier = function (specifier) {
+    return _isValidEventSpecifier(specifier) && !xray.isConstructorName(specifier);
+  };
+
   var _isValidEventSpecifier = function () {
     var specifiers = _.toArray(arguments);
     return _.all(specifiers, function(specifier) {
@@ -790,9 +802,6 @@
     return reversed;
   });
 
-  var _resetConfig = function () {
-    return xray.config = $.extend({}, xray.defaults.config);
-  };
 
   var _addFormatterFieldNames = function (formatters) {
     formatterFieldNames = _.uniq(formatterFieldNames.concat(
@@ -812,7 +821,7 @@
 
       _.each(formatterFieldNames, function (name) {
         var currMethod = formatter[name];
-        if(currMethod) {
+        if(currMethod && !currMethod.__xrayWrapped__) {
           formatter[name] = _.wrap(currMethod, function(origFunc, xray, eventInfo, callback) {
             var args = [].slice.call(arguments).slice(1),
                 origResults = origFunc.call(formatter, xray, eventInfo),
@@ -833,15 +842,15 @@
               console.log.apply(console, origResults);
             }
           });
+          formatter[name].__xrayWrapped__ = true;
         }
       });
       return formatter;
     });
 
-    formattersWrapped = true;
-
     return wrappedFormatters;
   };
+
 
   // Public API
 
@@ -849,17 +858,24 @@
 
     defaults: defaults,
 
-    config: $.extend({}, defaults.config),
+    config: $.extend({}, defaults.config, persistedSettings),
 
-    loggedEvents: persistedSettings.loggedEvents || [],
+    loggedEvents: persistedSettings ? persistedSettings.loggedEvents : [],
 
-    eventSpecifiers: persistedSettings.eventSpecifiers || [],
+    eventSpecifiers: persistedSettings ? persistedSettings.eventSpecifiers : [],
+
+    logQueue: logQueue,
 
     configure: function(config) {
-      _resetConfig();
 
-      // Omit aliases for now, because the aliases need to be parsed by addAliases
-      this.config = $.extend(true, {}, this.config, _.omit(config, 'aliases', 'formatters'));
+      if(typeof config === 'string'){
+        config = {};
+        config[arguments[0]] = arguments[1];
+      };
+
+      this.config = $.extend(true, {}, this.config);
+
+      if(config.throttleTime) this.throttle(config.throttleTime);
 
       if(config.aliases) this.addAliases.apply(this, config.aliases);
 
@@ -867,17 +883,30 @@
 
       if(config.instrumented) this.instrument.apply(this, config.instrumented);
 
-      if(!eventSpecifiersParsed) this.parseEventSpecifiers();
+      if(config.log) this.log = config.log;
+
+      this.parseEventSpecifiers();
 
       configured = true;
       Backbone.trigger('xray-configure');
+    },
+
+    throttle: function(throttleTime) {
+      if(xray.persistSettings) {
+        xray.settings.throttleTime = throttleTime;
+      };
+      _writeLogEntry.throttled = _.throttle(_writeLogEntry.unthrottled, throttleTime);
+    },
+
+    resetConfig: function () {
+      return this.config = $.extend({}, xray.defaults.config, xray.settings);
     },
 
     help: function() {
       this.openUi('help');
     },
 
-    focusOn: function() {
+    setLoggingFilter: function() {
 
      /**
       * Turn on event logging by supplying event specifiers as arguments. These specifiers
@@ -906,7 +935,7 @@
       *  - A string to be searched for as a substring within event names
       *  - A regular expression to be matched against event names
       *
-      * @method focusOn
+      * @methodsetLoggingFilter 
       * @param {Object} context The object that will have its dependencies
       */
 
@@ -944,7 +973,7 @@
 
     startLogging: function() {
       if(this.eventSpecifiers.length === 0) {
-        this.focusOn('*');
+        this.setLoggingFilter('*');
         console.warn('No event pattern specifiers have yet been provided. All events for all objects that extend ' +
                      'Backbone.Model, Backbone.Collection, Backbone.View, and Backbone.Router will be logged.')
       }
@@ -952,7 +981,10 @@
       this.isPaused = false;
 
       if(!eventSpecifiersParsed) this.parseEventSpecifiers();
-      if(!formattersWrapped) this.config.formatters = _wrapFormatters();
+
+      this.config.formatters = _wrapFormatters();
+
+      this.log = this.config.log;
 
       if(!configured) {
         Backbone.on('xray-configure', function() {
@@ -964,11 +996,9 @@
     },
 
     stopLogging: function() {
-      this.loggedEvents = [];
-      this.eventSpecifiers = [];
+      this.settings.loggedEvents = this.loggedEvents = [];
+      this.settings.eventSpecifiers = this.eventSpecifiers = [];
       eventSpecifiersParsed = false;
-      xray.removeSetting('loggedEvents');
-      xray.removeSetting('eventSpecifiers');
       this.isPaused = false;
       Backbone.trigger('xray-logging-stop');
     },
@@ -1006,6 +1036,16 @@
         }
       });
 
+      if(!_.any(loggedEvents, this.isConstructorName)) {
+        logAllObjects = true;
+      }
+
+      // Turn any simple substring event name specifiers into regex-ish strings
+      loggedEvents = _.map(loggedEvents, function(specifier) {;
+        if(!_isEventNameSpecifier(specifier)) return specifier;
+        return _toRegExpString(specifier);
+      });
+
       this.loggedEvents = _.uniq(loggedEvents);
 
       if(xray.persistSettings) {
@@ -1038,7 +1078,7 @@
     },
 
     isObjLogged: function(obj) {
-      return this.isObjLoggedInstance(obj) || this.doesObjMatchAlias(obj);
+      return logAllObjects || this.isObjLoggedInstance(obj) || this.doesObjMatchAlias(obj);
     },
 
     isObjLoggedInstance: function(obj) {
@@ -1118,13 +1158,6 @@
       this.parseEventSpecifiers();
     },
 
-    log: function() {
-      var logFunc = _.bind(this.config.log, this);
-      logFunc.apply(this, arguments);
-      this.log = logFunc;
-      logFunc = _.throttle(logFunc, this.config.throttleTime);
-    },
-
     util : util
 
   });
@@ -1144,10 +1177,10 @@
   // Start logging if persistSettings is true
   if(xray.eventSpecifiers.length) xray.startLogging();
 
-  Backbone.focusOn      = _.bind(xray.focusOn, xray);
-  Backbone.startLogging = _.bind(xray.startLogging, xray);
-  Backbone.stopLogging  = _.bind(xray.stopLogging, xray);
-  Backbone.pauseLogging = _.bind(xray.pauseLogging, xray);
+  Backbone.setLoggingFilter = _.bind(xray.setLoggingFilter, xray);
+  Backbone.startLogging     = _.bind(xray.startLogging, xray);
+  Backbone.stopLogging      = _.bind(xray.stopLogging, xray);
+  Backbone.pauseLogging     = _.bind(xray.pauseLogging, xray);
 
   // Export the module to Backbone in the browser, and AMD and Node via return
   return (Backbone.xray = xray);
