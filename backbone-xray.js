@@ -161,18 +161,12 @@
   var settingKeys = [
     'throttleTime',
     'eventSpecifiers',
+    'autoStart',
     'chromeExtensionId'
   ];
 
   var _extractSettingsFromConfig = function () {
-    if(typeof xray.config === 'object') {
-      return {
-        throttleTime: xray.config.throttleTime,
-        eventSpecifiers: xray.eventSpecifiers || null,
-        loggedEvents: xray.loggedEvents || null
-      }
-    }
-    return {}
+    return _.pick.apply(_, _.union(xray.config, settingKeys));
   };
 
   var _initPersistedSettings = function () {
@@ -182,6 +176,8 @@
 
     _.each(settingKeys, function (key) {
       Object.defineProperty(settings, key, {
+
+        enumerable: true,
 
         get: function() {
           var settings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
@@ -206,6 +202,7 @@
   };
 
   var _destroyPersistedSettings = function () {
+    persistedSettings = null;
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
   };
 
@@ -501,7 +498,11 @@
 
     throttleTime : defaultThrottleTime,
 
+    autoStart    : false,
+
     instrumented : [],
+
+    eventSpecifiers: [],
 
     constructors : backboneConstructors,
 
@@ -875,6 +876,8 @@
 
     loggedEvents: [],
 
+    settingKeys: settingKeys,
+
     eventSpecifiers: persistedSettings ? persistedSettings.eventSpecifiers : [],
 
     logQueue: logQueue,
@@ -913,7 +916,7 @@
       this.openUi('help');
     },
 
-    setLoggingFilter: function() {
+    setFilters: function() {
 
      /**
       * Turn on event logging by supplying event specifiers as arguments. These specifiers
@@ -942,8 +945,7 @@
       *  - A string to be searched for as a substring within event names
       *  - A regular expression to be matched against event names
       *
-      * @methodsetLoggingFilter
-      * @param {Object} context The object that will have its dependencies
+      * @method setFilters
       */
 
       if(arguments[0] === null) {
@@ -959,7 +961,7 @@
         eventSpecifiers = ['*backbone'];
       }
 
-      this.eventSpecifiers = eventSpecifiers.sort(_compareEventSpecifiers);
+      this.eventSpecifiers = this.config.eventSpecifiers = eventSpecifiers.sort(_compareEventSpecifiers);
       this.validateEventSpecifiers();
       this.parseEventSpecifiers();
 
@@ -980,7 +982,7 @@
 
     startLogging: function() {
       if(this.eventSpecifiers.length === 0) {
-        this.setLoggingFilter('*');
+        this.setFilters('*');
         console.warn('No event pattern specifiers have yet been provided. All events for all objects that extend ' +
                      'Backbone.Model, Backbone.Collection, Backbone.View, and Backbone.Router will be logged.')
       }
@@ -1068,6 +1070,10 @@
       this.config.throttleTime = throttleTime;
       if(this.persistSettings) this.settings.throttleTime = throttleTime;
       _writeLogEntry.throttled = _.throttle(_writeLogEntry.unthrottled, throttleTime);
+    },
+
+    autoStart: function() {
+      this.settings.autoStart = this.config.autoStart = arguments[0] === false ? false : true;
     },
 
     validateEventSpecifiers: function() {
@@ -1194,12 +1200,12 @@
   }
 
   // Start logging if persistSettings is true
-  if(xray.eventSpecifiers.length) xray.startLogging();
+  if(xray.eventSpecifiers.length && _.result(xray.settings, 'autoStart')) xray.startLogging();
 
-  Backbone.setLoggingFilter = _.bind(xray.setLoggingFilter, xray);
-  Backbone.startLogging     = _.bind(xray.startLogging, xray);
-  Backbone.stopLogging      = _.bind(xray.stopLogging, xray);
-  Backbone.pauseLogging     = _.bind(xray.pauseLogging, xray);
+  Backbone.setLogFilters = _.bind(xray.setFilters, xray);
+  Backbone.startLogging  = _.bind(xray.startLogging, xray);
+  Backbone.stopLogging   = _.bind(xray.stopLogging, xray);
+  Backbone.pauseLogging  = _.bind(xray.pauseLogging, xray);
 
   // Export the module to Backbone in the browser, and AMD and Node via return
   return (Backbone.xray = xray);
