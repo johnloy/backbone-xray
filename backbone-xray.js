@@ -160,7 +160,7 @@
 
   var settingKeys = [
     'throttleTime',
-    'eventSpecifiers',
+    'filters',
     'autoStart',
     'chromeExtensionId'
   ];
@@ -502,7 +502,7 @@
 
     instrumented : [],
 
-    eventSpecifiers: [],
+    filters: [],
 
     constructors : backboneConstructors,
 
@@ -721,14 +721,14 @@
   * ## Main API
   * ======================================================================== */
 
-  var eventSpecifiersParsed = false,
+  var filtersParsed = false,
       configured = false,
       formatterFieldNames = [],
       logAllObjects = false;
 
   // Private methods
 
-  var _compareEventSpecifiers = function (a, b) {
+  var _compareFilters = function (a, b) {
     if( (_.isString(a) && a[0].match(/[A-Z]/)) ||
        _.isFunction(a) ) {
       return -1;
@@ -767,27 +767,27 @@
     return false;
   };
 
-  var _isPatternSpecifier = function (specifier) {
-    return _.isString(specifier) && specifier[0] === '/';
+  var _isPatternFilter = function (filter) {
+    return _.isString(filter) && filter[0] === '/';
   };
 
-  var _isEventNameSpecifier = function (specifier) {
-    return _isValidEventSpecifier(specifier) && !xray.isConstructorName(specifier);
+  var _isEventNameFilter = function (filter) {
+    return _isValidEventFilter(filter) && !xray.isConstructorName(filter);
   };
 
-  var _isValidEventSpecifier = function () {
-    var specifiers = _.toArray(arguments);
-    return _.all(specifiers, function(specifier) {
+  var _isValidEventFilter = function () {
+    var filters = _.toArray(arguments);
+    return _.all(filters, function(filter) {
       return _.any( [ _.isString, _.isRegExp ],
-                   function(test) { return test(specifier); }
+                   function(test) { return test(filter); }
                   );
     });
   };
 
-  var _stringifyEventSpecifiers = function (eventSpecifiers) {
-    return _.map(eventSpecifiers, function(specifier) {
-      if(specifier instanceof RegExp) return _toRegExpString(specifier);
-      return specifier;
+  var _stringifyFilters = function (filters) {
+    return _.map(filters, function(filter) {
+      if(filter instanceof RegExp) return _toRegExpString(filter);
+      return filter;
     });
   };
 
@@ -798,7 +798,7 @@
   // We can't store RegExp objects in xray.loggedEvents, as identical RegExp
   // instances aren't ===, so comparison's don't work (WTF ???)
   var _toRegExpString = function (pattern) {
-    if(_isPatternSpecifier(pattern.toString())) {
+    if(_isPatternFilter(pattern.toString())) {
       return pattern.toString();
     }
     else {
@@ -878,7 +878,7 @@
 
     settingKeys: settingKeys,
 
-    eventSpecifiers: persistedSettings ? persistedSettings.eventSpecifiers : [],
+    filters: persistedSettings ? persistedSettings.filters : [],
 
     logQueue: logQueue,
 
@@ -901,7 +901,7 @@
 
       if(config.log) this.log = config.log;
 
-      this.parseEventSpecifiers();
+      this.parseFilters();
 
       configured = true;
       Backbone.trigger('xray-configure');
@@ -919,29 +919,29 @@
     setFilters: function() {
 
      /**
-      * Turn on event logging by supplying event specifiers as arguments. These specifiers
+      * Turn on event logging by supplying event filters as arguments. These filters
       * limit logged events to only ones triggered on specified objects and with specified
       * event names.
       *
-      * Specifiers can reference an object, a predefined class of objects, or an event name
-      * pattern. Any number of specifier arguments in any order can be supplied. If none
+      * filters can reference an object, a predefined class of objects, or an event name
+      * pattern. Any number of filter arguments in any order can be supplied. If none
       * are supplied, event logging is disabled.
       *
-      * When both object and event name specifiers exist, only events matching both one
-      * of the object specifiers and one of the event name specifiers will be logged.
+      * When both object and event name filters exist, only events matching both one
+      * of the object filters and one of the event name filters will be logged.
       *
-      * When only event name specifiers exist, events triggered on any object matching the
+      * When only event name filters exist, events triggered on any object matching the
       * name pattern will be logged.
       *
-      * When only object specifiers exist, all events triggered on only those objects will
+      * When only object filters exist, all events triggered on only those objects will
       * be logged.
       *
-      * Object specifiers may take any of the following forms:
+      * Object filters may take any of the following forms:
       *  - A string of the name of a constructor function (example: 'HotelModel')
       *  - A reference to a constructor function
       *  - A string representing a class of objects (example: 'model')
       *
-      * Event name specifiers may take any of the following forms:
+      * Event name filters may take any of the following forms:
       *  - A string to be searched for as a substring within event names
       *  - A regular expression to be matched against event names
       *
@@ -953,17 +953,17 @@
         return;
       }
 
-      var eventSpecifiers = null;
+      var filters = null;
 
       if(arguments && arguments.length && arguments[0] !== '*') {
-        eventSpecifiers = _.toArray(arguments);
+        filters = _.toArray(arguments);
       } else {
-        eventSpecifiers = ['*backbone'];
+        filters = ['*backbone'];
       }
 
-      this.eventSpecifiers = this.config.eventSpecifiers = eventSpecifiers.sort(_compareEventSpecifiers);
-      this.validateEventSpecifiers();
-      this.parseEventSpecifiers();
+      this.filters = this.config.filters = filters.sort(_compareFilters);
+      this.validateFilters();
+      this.parseFilters();
 
       return this.loggedEvents;
     },
@@ -981,15 +981,15 @@
     },
 
     startLogging: function() {
-      if(this.eventSpecifiers.length === 0) {
+      if(this.filters.length === 0) {
         this.setFilters('*');
-        console.warn('No event pattern specifiers have yet been provided. All events for all objects that extend ' +
+        console.warn('No event pattern filters have yet been provided. All events for all objects that extend ' +
                      'Backbone.Model, Backbone.Collection, Backbone.View, and Backbone.Router will be logged.')
       }
 
       this.isPaused = false;
 
-      this.parseEventSpecifiers();
+      this.parseFilters();
 
       this.config.formatters = _wrapFormatters();
 
@@ -1005,9 +1005,8 @@
     },
 
     stopLogging: function() {
-      this.settings.loggedEvents = this.loggedEvents = [];
-      this.settings.eventSpecifiers = this.eventSpecifiers = [];
-      eventSpecifiersParsed = false;
+      this.settings.filters = this.filters = [];
+      filtersParsed = false;
       this.isPaused = false;
       Backbone.trigger('xray-logging-stop');
     },
@@ -1017,31 +1016,31 @@
       Backbone.trigger('xray-logging-pause');
     },
 
-    parseEventSpecifiers: function() {
+    parseFilters: function() {
       var self = this,
           loggedEvents = this.loggedEvents = [],
           eventObjMatchers = this.eventObjMatchers = [];
 
-      _.each(this.eventSpecifiers, function(specifier) {
+      _.each(this.filters, function(filter) {
         var alias;
 
         // Constructor name
-        if(self.isConstructorName(specifier)) {
-          loggedEvents.push(specifier);
+        if(self.isConstructorName(filter)) {
+          loggedEvents.push(filter);
         }
 
         // Alias
-        else if(typeof specifier === 'string' && specifier[0] === '*' && self.config.aliases.length) {
-          alias = _.findWhere(self.config.aliases, {name: specifier.slice(1)});
+        else if(typeof filter === 'string' && filter[0] === '*' && self.config.aliases.length) {
+          alias = _.findWhere(self.config.aliases, {name: filter.slice(1)});
           if(alias) {
             loggedEvents = loggedEvents.concat(alias.expanded);
             if(_.isFunction(alias.match)) eventObjMatchers.push(_.bind(alias.match, alias));
           }
         }
 
-        // String or Regexp event name specifier
+        // String or Regexp event name filter
         else {
-          loggedEvents.push(_toRegExpString(specifier));
+          loggedEvents.push(_toRegExpString(filter));
         }
       });
 
@@ -1051,19 +1050,19 @@
         logAllObjects = false;
       }
 
-      // Turn any simple substring event name specifiers into regex-ish strings
-      loggedEvents = _.map(loggedEvents, function(specifier) {;
-        if(!_isEventNameSpecifier(specifier)) return specifier;
-        return _toRegExpString(specifier);
+      // Turn any simple substring event name filters into regex-ish strings
+      loggedEvents = _.map(loggedEvents, function(filter) {;
+        if(!_isEventNameFilter(filter)) return filter;
+        return _toRegExpString(filter);
       });
 
       this.loggedEvents = _.uniq(loggedEvents);
 
       if(xray.persistSettings) {
-        xray.settings.eventSpecifiers = _stringifyEventSpecifiers(this.eventSpecifiers);
+        xray.settings.filters = _stringifyFilters(this.filters);
       }
 
-      eventSpecifiersParsed = true;
+      filtersParsed = true;
     },
 
     throttle: function(throttleTime) {
@@ -1076,14 +1075,14 @@
       this.settings.autoStart = this.config.autoStart = arguments[0] === false ? false : true;
     },
 
-    validateEventSpecifiers: function() {
-      if(!_isValidEventSpecifier.apply(this, this.eventSpecifiers)) {
-        throw new Error('Specifier for types of events to log must be a String or RexExp.');
+    validateFilters: function() {
+      if(!_isValidEventFilter.apply(this, this.filters)) {
+        throw new Error('Filter for types of events to log must be a String or RexExp.');
       }
     },
 
     isEventNameLogged: function(eventName) {
-      var loggedPatterns = _.select(this.loggedEvents, _isPatternSpecifier),
+      var loggedPatterns = _.select(this.loggedEvents, _isPatternFilter),
           regexes = _.map(loggedPatterns, _patternStrToRegExp),
           eventNameMatches = function(regex) { return regex.test(eventName); };
       return _.isEmpty(loggedPatterns) || _.any(regexes, eventNameMatches);
@@ -1174,14 +1173,14 @@
 
     addAliases: function() {
       var args = _.toArray(arguments),
-          parseEventSpecifiers = true;
+          parseFilters = true;
 
-      if(typeof args[0] === 'boolean') parseEventSpecifiers = args.shift();
+      if(typeof args[0] === 'boolean') parseFilters = args.shift();
 
       this.config.aliases = _.union(this.config.aliases, args);
       this.config.aliases = _.map(this.config.aliases, _.bind(_expandEventAliases, this));
 
-      if(parseEventSpecifiers) this.parseEventSpecifiers();
+      if(parseFilters) this.parseFilters();
     },
 
     util : util
@@ -1200,7 +1199,7 @@
   }
 
   // Start logging if persistSettings is true
-  if(xray.eventSpecifiers.length && _.result(xray.settings, 'autoStart')) xray.startLogging();
+  if(xray.filters.length && _.result(xray.settings, 'autoStart')) xray.startLogging();
 
   Backbone.setLogFilters = _.bind(xray.setFilters, xray);
   Backbone.startLogging  = _.bind(xray.startLogging, xray);
