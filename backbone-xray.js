@@ -136,18 +136,38 @@
 
  /**
   * ## Settings
-  * ======================================================================== */
+  * ===========================================================================
+  * When the page is loading, first attempt to read settings from localStorage.
+  * A final step in the initialization of Backbone.xray is to force a call to
+  * _initPersistedSettings if persisted settings are detected.
+  *
+  * If persisted settings are found, set a boolean persistSettingsOption,
+  * stored in a closure, to branch behavior depending upon whether settings
+  * should be applied to xray.config.
+  *
+  * Persisted settings can be toggled by assigning a boolean value to
+  * Backbone.xray.persistSettings. The persistSettings property is defined with
+  * a getter and setter. Its default value is false. The getter simply returns
+  * the value of persistSettingsOption. The setter first sets persistSettingsOpt
+  * to the value, and then either calls _initPersistedSettings if the value is
+  * true or _destroyPersistedSettings if the value is false.
+  *
+  */
 
   var SETTINGS_STORAGE_KEY = 'backbone-xray.settings',
       persistedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY)),
       persistSettingsOpt = persistedSettings ? true : false;
 
-  var settingKeys = ['throttleTime', 'eventSpecifiers', 'loggedEvents'];
+  var settingKeys = [
+    'throttleTime',
+    'eventSpecifiers',
+    'chromeExtensionId'
+  ];
 
-  var _extractSettings = function () {
+  var _extractSettingsFromConfig = function () {
     if(typeof xray.config === 'object') {
       return {
-        throttleTime: xray.config ? xray.config.throttleTime : xray.defaults.config.throttleTime,
+        throttleTime: xray.config.throttleTime,
         eventSpecifiers: xray.eventSpecifiers || null,
         loggedEvents: xray.loggedEvents || null
       }
@@ -158,7 +178,7 @@
   var _initPersistedSettings = function () {
 
     var settings = {},
-        initialSettings = persistedSettings || _extractSettings();
+        initialSettings = persistedSettings || _extractSettingsFromConfig();
 
     _.each(settingKeys, function (key) {
       Object.defineProperty(settings, key, {
@@ -179,7 +199,6 @@
       });
 
       settings[key] = initialSettings[key];
-
     });
 
     xray.settings = settings;
@@ -197,13 +216,13 @@
       return persistSettingsOpt;
     },
     set: function(persist) {
+      persistSettingsOpt = persist;
       if(persist) {
         _initPersistedSettings();
       }
       else {
         _destroyPersistedSettings();
       }
-      persistSettingsOpt = persist;
       return persist;
     }
   });
@@ -231,7 +250,7 @@
   var origTrigger  = Backbone.Events.trigger,
       trigger      = origTrigger,
       logQueue     = [],
-      defaultThrottleTime = 100,
+      defaultThrottleTime = 20,
       _writeLogEntry = { unthrottled: null, throttled: null };
 
   _writeLogEntry.unthrottled = function (eventInfo) {
@@ -480,224 +499,218 @@
 
  var defaults = {
 
-    chromeExtensionId: null,
+    throttleTime : defaultThrottleTime,
 
-    config: {
+    instrumented : [],
 
-      throttleTime : defaultThrottleTime,
+    constructors : backboneConstructors,
 
-      instrumented : [],
+    formatters   : [
+      {
+        name: 'method',
 
-      constructors : backboneConstructors,
-
-      formatters   : [
-        {
-          name: 'method',
-
-          match: function(xray, eventInfo) {
-            return eventInfo.type === 'method';
-          },
-
-          summary: function(xray, eventInfo) {
-            return ['Method: ' + eventInfo.name];
-          },
-
-          obj: function(xray, eventInfo) {
-            return [ 'Called on: ', eventInfo.obj ];
-          },
-
-          arguments: function(xray, eventInfo) {
-            return ['Arguments: ', eventInfo.arguments]
-          },
-
-          definition: function(xray, eventInfo) {
-            return ['Definition:', function() {
-              console.log(eventInfo.definition);
-            }];
-          } 
+        match: function(xray, eventInfo) {
+          return eventInfo.type === 'method';
         },
-        {
-          name: 'model',
-          match: function(xray, eventInfo) {
-            return eventInfo.obj instanceof Backbone.Model;
-          },
-          summary: function(xray, eventInfo) {
-            var label = null,
-                obj = eventInfo.obj,
-                strategies = [
-                  function getName() {
-                    var name = obj.name || _.isFunction(obj.get) ? obj.get('name') : undefined;
-                    return name ? xray.getTypeOf(obj) + '(name: "' + name + '")' : undefined;
-                  },
-                  function getId() {
-                    var obj = eventInfo.obj,
-                        idProp = obj.id ? 'id' : 'cid';
-                    if(obj[idProp]) {
-                      return xray.getTypeOf(obj) + '(' + idProp + ': ' + obj[idProp] + ')';
-                    }
-                  }
-                ].reverse(),
-                i = strategies.length;
 
-            while(i--) {
-              label = strategies[i]();
-              if(label) {
-                return [
-                  'Event: %s ❯ %s',
-                  label,
-                  eventInfo.name
-                ];
-              }
+        summary: function(xray, eventInfo) {
+          return ['Method: ' + eventInfo.name];
+        },
+
+        obj: function(xray, eventInfo) {
+          return [ 'Called on: ', eventInfo.obj ];
+        },
+
+        arguments: function(xray, eventInfo) {
+          return ['Arguments: ', eventInfo.arguments]
+        },
+
+        definition: function(xray, eventInfo) {
+          return ['Definition:', function() {
+            console.log(eventInfo.definition);
+          }];
+        }
+      },
+      {
+        name: 'model',
+        match: function(xray, eventInfo) {
+          return eventInfo.obj instanceof Backbone.Model;
+        },
+        summary: function(xray, eventInfo) {
+          var label = null,
+              obj = eventInfo.obj,
+              strategies = [
+                function getName() {
+                  var name = obj.name || _.isFunction(obj.get) ? obj.get('name') : undefined;
+                  return name ? xray.getTypeOf(obj) + '(name: "' + name + '")' : undefined;
+                },
+                function getId() {
+                  var obj = eventInfo.obj,
+                      idProp = obj.id ? 'id' : 'cid';
+                  if(obj[idProp]) {
+                    return xray.getTypeOf(obj) + '(' + idProp + ': ' + obj[idProp] + ')';
+                  }
+                }
+              ].reverse(),
+              i = strategies.length;
+
+          while(i--) {
+            label = strategies[i]();
+            if(label) {
+              return [
+                'Event: %s ❯ %s',
+                label,
+                eventInfo.name
+              ];
             }
           }
+        }
+      },
+      {
+        name: 'collection',
+        match: function(xray, eventInfo) {
+          return eventInfo.obj instanceof Backbone.Collection;
         },
-        {
-          name: 'collection',
-          match: function(xray, eventInfo) {
-            return eventInfo.obj instanceof Backbone.Collection;
-          },
-          summary: function(xray, eventInfo) {
-            var obj = eventInfo.obj;
-            return [
-              'Event: %s ❯ %s',
-              xray.getTypeOf(obj) + '(length: ' + obj.length + ')',
-              eventInfo.name
-            ];
-          }
+        summary: function(xray, eventInfo) {
+          var obj = eventInfo.obj;
+          return [
+            'Event: %s ❯ %s',
+            xray.getTypeOf(obj) + '(length: ' + obj.length + ')',
+            eventInfo.name
+          ];
+        }
+      },
+      {
+        name: 'view',
+        match: function(xray, eventInfo) {
+          return eventInfo.obj instanceof Backbone.View;
         },
-        {
-          name: 'view',
-          match: function(xray, eventInfo) {
-            return eventInfo.obj instanceof Backbone.View;
-          },
-          summary: function(xray, eventInfo) {
-            var obj = eventInfo.obj;
-            return [
-              'Event: %s ❯ %s',
-              xray.getTypeOf(obj),
-              eventInfo.name
-            ];
-          }
+        summary: function(xray, eventInfo) {
+          var obj = eventInfo.obj;
+          return [
+            'Event: %s ❯ %s',
+            xray.getTypeOf(obj),
+            eventInfo.name
+          ];
+        }
+      },
+      {
+        name: 'router',
+        match: function(xray, eventInfo) {
+          return eventInfo.obj instanceof Backbone.Router;
         },
-        {
-          name: 'router',
-          match: function(xray, eventInfo) {
-            return eventInfo.obj instanceof Backbone.Router;
-          },
-          summary: function(xray, eventInfo) {
-            var obj = eventInfo.obj;
-            return [
-              'Event: %s ❯ %s',
-              xray.getTypeOf(obj),
-              eventInfo.name
-            ];
-          }
+        summary: function(xray, eventInfo) {
+          var obj = eventInfo.obj;
+          return [
+            'Event: %s ❯ %s',
+            xray.getTypeOf(obj),
+            eventInfo.name
+          ];
+        }
+      },
+      { name: 'default',
+        match: function() { return true; },
+
+        summary: function(xray, eventInfo) {
+          var obj = eventInfo.obj;
+          return [ 'Event: %s ❯ %s', xray.getTypeOf(obj), eventInfo.name ];
         },
-        { name: 'default',
-          match: function() { return true; },
 
-          summary: function(xray, eventInfo) {
-            var obj = eventInfo.obj;
-            return [ 'Event: %s ❯ %s', xray.getTypeOf(obj), eventInfo.name ];
-          },
+        obj: function(xray, eventInfo) {
+          return [ 'Triggered on: ', eventInfo.obj ];
+        },
 
-          obj: function(xray, eventInfo) {
-            return [ 'Triggered on: ', eventInfo.obj ];
-          },
+        listeners: function(xray, eventInfo) {
 
-          listeners: function(xray, eventInfo) {
+          if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
 
-            if(eventInfo.obj._events && eventInfo.obj._events[eventInfo.name]) {
+            var formatter = ['Listeners: '];
 
-              var formatter = ['Listeners: '];
+            _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
+              var funcStr = listener.callback.toString();
+              var funcName = (function() {
+                var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
+                if(logRef) return logRef[1] + ':';
+              }());
 
-              _.each(eventInfo.obj._events[eventInfo.name], function(listener, i) {
-                var funcStr = listener.callback.toString();
-                var funcName = (function() {
-                  var logRef = funcStr.match(/@name\s(\w+#[a-zA-Z0-9_]+)/);
-                  if(logRef) return logRef[1] + ':';
-                }());
-
-                formatter.push(function() {
-                  console.groupCollapsed(funcName || '(anonymous): ');
-                    console.log(listener.callback.toString());
-                  console.groupEnd();
-                });
-
+              formatter.push(function() {
+                console.groupCollapsed(funcName || '(anonymous): ');
+                  console.log(listener.callback.toString());
+                console.groupEnd();
               });
 
-              return formatter;
-            }
-          },
+            });
 
-          data: function(xray, eventInfo) {
-            return [ 'Data: ', eventInfo.data ];
-          },
-
-          location: function(xray, eventInfo) {
-            return [ 'At (file:line): ' + eventInfo.location ];
-          },
-
-          timeElapsed: function(xray, eventInfo) {
-            return [ 'Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds' ];
-          },
-
-          stack: function(xray, eventInfo) {
-            return [
-              'Call stack: ',
-              function() {
-                console.log(eventInfo.stack);
-              }
-            ];
-          },
-
-          prepend: noop,
-          append: noop
-        }
-      ],
-
-      aliases      : [
-        {
-          name: 'backbone',
-          expanded: ['Model', 'Collection', 'View', 'Router']
+            return formatter;
+          }
         },
-        {
-          name: 'backbone-data',
-          expanded: ['Model', 'Collection']
-        }
-      ],
 
-      isRelevantStackLine: function (stackLine) {
-       if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
-      },
+        data: function(xray, eventInfo) {
+          return [ 'Data: ', eventInfo.data ];
+        },
 
-      log: function (entry, eventInfo) {
+        location: function(xray, eventInfo) {
+          return [ 'At (file:line): ' + eventInfo.location ];
+        },
 
-        if(eventInfo.type === 'event') {
-          entry.summary(function() {
-            entry.prepend();
-            entry.obj();
-            entry.location();
-            entry.data();
-            entry.listeners();
-            entry.timeElapsed();
-            entry.stack();
-            entry.append();
-          });
-        } else {
-          entry.summary(function() {
-            entry.prepend();
-            entry.obj();
-            entry.arguments();
-            entry.location();
-            entry.definition();
-            entry.timeElapsed();
-            entry.stack();
-            entry.append();
-          });
-        }
+        timeElapsed: function(xray, eventInfo) {
+          return [ 'Time since previous event logged: ' + eventInfo.timeElapsed / 1000 + ' seconds' ];
+        },
+
+        stack: function(xray, eventInfo) {
+          return [
+            'Call stack: ',
+            function() {
+              console.log(eventInfo.stack);
+            }
+          ];
+        },
+
+        prepend: noop,
+        append: noop
       }
+    ],
 
+    aliases      : [
+      {
+        name: 'backbone',
+        expanded: ['Model', 'Collection', 'View', 'Router']
+      },
+      {
+        name: 'backbone-data',
+        expanded: ['Model', 'Collection']
+      }
+    ],
+
+    isRelevantStackLine: function (stackLine) {
+     if(!/(backbone|underscore|jquery)(\..+\.|\.)js/.test(stackLine)) return true;
+    },
+
+    log: function (entry, eventInfo) {
+
+      if(eventInfo.type === 'event') {
+        entry.summary(function() {
+          entry.prepend();
+          entry.obj();
+          entry.location();
+          entry.data();
+          entry.listeners();
+          entry.timeElapsed();
+          entry.stack();
+          entry.append();
+        });
+      } else {
+        entry.summary(function() {
+          entry.prepend();
+          entry.obj();
+          entry.arguments();
+          entry.location();
+          entry.definition();
+          entry.timeElapsed();
+          entry.stack();
+          entry.append();
+        });
+      }
     }
 
   };
@@ -858,9 +871,9 @@
 
     defaults: defaults,
 
-    config: $.extend({}, defaults.config, persistedSettings),
+    config: $.extend({}, defaults, persistedSettings),
 
-    loggedEvents: persistedSettings ? persistedSettings.loggedEvents : [],
+    loggedEvents: [],
 
     eventSpecifiers: persistedSettings ? persistedSettings.eventSpecifiers : [],
 
@@ -873,11 +886,11 @@
         config[arguments[0]] = arguments[1];
       };
 
-      this.config = $.extend(true, {}, this.config);
+      this.config = $.extend(true, {}, this.config, _.omit(config, 'aliases'));
 
       if(config.throttleTime) this.throttle(config.throttleTime);
 
-      if(config.aliases) this.addAliases.apply(this, config.aliases);
+      if(config.aliases) this.addAliases.apply(this, _.union(false, config.aliases));
 
       if(config.formatters) this.addFormatters.apply(this, config.formatters);
 
@@ -891,15 +904,9 @@
       Backbone.trigger('xray-configure');
     },
 
-    throttle: function(throttleTime) {
-      if(xray.persistSettings) {
-        xray.settings.throttleTime = throttleTime;
-      };
-      _writeLogEntry.throttled = _.throttle(_writeLogEntry.unthrottled, throttleTime);
-    },
 
     resetConfig: function () {
-      return this.config = $.extend({}, xray.defaults.config, xray.settings);
+      return this.config = $.extend({}, xray.defaults, xray.settings);
     },
 
     help: function() {
@@ -935,7 +942,7 @@
       *  - A string to be searched for as a substring within event names
       *  - A regular expression to be matched against event names
       *
-      * @methodsetLoggingFilter 
+      * @methodsetLoggingFilter
       * @param {Object} context The object that will have its dependencies
       */
 
@@ -980,7 +987,7 @@
 
       this.isPaused = false;
 
-      if(!eventSpecifiersParsed) this.parseEventSpecifiers();
+      this.parseEventSpecifiers();
 
       this.config.formatters = _wrapFormatters();
 
@@ -1036,8 +1043,10 @@
         }
       });
 
-      if(!_.any(loggedEvents, this.isConstructorName)) {
+      if(!_.any(loggedEvents, this.isConstructorName) && !this.eventObjMatchers.length) {
         logAllObjects = true;
+      } else {
+        logAllObjects = false;
       }
 
       // Turn any simple substring event name specifiers into regex-ish strings
@@ -1049,11 +1058,16 @@
       this.loggedEvents = _.uniq(loggedEvents);
 
       if(xray.persistSettings) {
-        xray.settings.loggedEvents = loggedEvents;
         xray.settings.eventSpecifiers = _stringifyEventSpecifiers(this.eventSpecifiers);
       }
 
       eventSpecifiersParsed = true;
+    },
+
+    throttle: function(throttleTime) {
+      this.config.throttleTime = throttleTime;
+      if(this.persistSettings) this.settings.throttleTime = throttleTime;
+      _writeLogEntry.throttled = _.throttle(_writeLogEntry.unthrottled, throttleTime);
     },
 
     validateEventSpecifiers: function() {
@@ -1153,9 +1167,15 @@
     },
 
     addAliases: function() {
-      this.config.aliases = _.union(this.config.aliases, _.toArray(arguments));
+      var args = _.toArray(arguments),
+          parseEventSpecifiers = true;
+
+      if(typeof args[0] === 'boolean') parseEventSpecifiers = args.shift();
+
+      this.config.aliases = _.union(this.config.aliases, args);
       this.config.aliases = _.map(this.config.aliases, _.bind(_expandEventAliases, this));
-      this.parseEventSpecifiers();
+
+      if(parseEventSpecifiers) this.parseEventSpecifiers();
     },
 
     util : util
@@ -1167,11 +1187,10 @@
   xray.addFormatter = xray.addFormatters;
   xray.addAlias = xray.addAliases;
 
-  if(persistedSettings) {
-    xray.persistSettings = true;
+  if(persistSettingsOpt) {
+    _initPersistedSettings();
   } else {
-    xray.settings = null;
-    xray.persistSettings = persistSettingsOpt;
+    xray.settings = {};
   }
 
   // Start logging if persistSettings is true

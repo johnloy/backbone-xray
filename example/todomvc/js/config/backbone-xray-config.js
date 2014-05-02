@@ -5,7 +5,7 @@
     instrumented: ['app'],
 
     isRelevantStackLine: function(stackline) {
-      return this.defaults.config.isRelevantStackLine(stackline);
+      return this.defaults.isRelevantStackLine(stackline);
     },
 
     constructors: {
@@ -26,16 +26,14 @@
           var title = obj.get && obj.get('title');
           return (/hello/i).test(title);
         }
+      },
+      {
+        name: 'completed',
+        expanded: [/completed/]
       }
     ],
 
     formatters: [
-      // {
-      //   name: 'method',
-      //   summary: function() {
-      //     return ['yay'];
-      //   }
-      // },
       {
         name: 'collection',
         prepend: function() {
