@@ -129,6 +129,14 @@
       var re = new RegExp('^[ \\t]{' + indent + '}', 'gm');
 
       return indent > 0 ? str.replace(re, '') : str;
+    },
+
+    styleConsoleLine: function(content, styles) {
+      return [
+        '%c' + content + '%c',
+        styles,
+        styles + 'padding-right: 2000px; padding-left: 0; margin-right: -2000px'
+      ]
     }
 
   };
@@ -515,7 +523,10 @@
         },
 
         summary: function(xray, eventInfo) {
-          return ['Method: ' + eventInfo.name];
+          return xray.util.styleConsoleLine(
+            'Method: ' + eventInfo.name,
+            'font-family: "Helvetica Neue"; font-size: 12px; line-height: 20px; background: rgb(234, 243, 255); padding: 3px 0 4px .5em;' 
+          );
         },
 
         obj: function(xray, eventInfo) {
